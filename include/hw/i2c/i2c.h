@@ -43,6 +43,11 @@ typedef struct I2CSlaveClass {
      * return code is not used and should be zero.
      */
     int (*event)(I2CSlave *s, enum i2c_event event);
+
+    /* Notify the slave what address was decoded. Only needed for slaves that
+     * decode multiple addresses. Called after event() for I2C_START_RECV/SEND
+     */
+    void (*decode_address)(I2CSlave *s, uint8_t address);
 } I2CSlaveClass;
 
 struct I2CSlave {
@@ -50,6 +55,7 @@ struct I2CSlave {
 
     /* Remaining fields for internal use by the I2C code.  */
     uint8_t address;
+    uint8_t address_range;
 };
 
 #define TYPE_I2C_BUS "i2c-bus"
