@@ -7,6 +7,10 @@ config FDC
 config SSI_M25P80
     bool
 
+config M24CXX
+    bool
+    select I2C
+
 config NAND
     bool
 
