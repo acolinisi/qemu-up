@@ -74,6 +74,10 @@ struct NANDFlashState {
     uint8_t *ioaddr;
     int iolen;
 
+    uint8_t reg_data[16];
+    int reglen;
+    uint8_t *regaddr;
+
     uint32_t cmd;
     uint64_t addr;
     int addrlen;
@@ -359,11 +363,18 @@ static void nand_reset(DeviceState *dev)
     s->status |= NAND_IOSTATUS_READY;
 }
 
-static inline void nand_pushio_byte(NANDFlashState *s, uint8_t value)
+static inline void nand_pushio_byte(NANDFlashState *s, uint8_t value, bool reg)
 {
-    s->ioaddr[s->iolen++] = value;
-    for (value = s->buswidth; --value;) {
-        s->ioaddr[s->iolen++] = 0;
+    if (reg) { /* Push bytes for register read */
+        s->regaddr[s->reglen++] = value;
+        for (value = s->buswidth; --value;) {
+            s->reg_data[s->reglen++] = 0;
+        }
+    } else {
+        s->ioaddr[s->iolen++] = value;
+        for (value = s->buswidth; --value;) {
+            s->ioaddr[s->iolen++] = 0;
+        }
     }
 }
 
@@ -379,16 +390,16 @@ static void nand_command(NANDFlashState *s)
     case NAND_CMD_READID:
         s->ioaddr = s->io;
         s->iolen = 0;
-        nand_pushio_byte(s, s->manf_id);
-        nand_pushio_byte(s, s->chip_id);
+        nand_pushio_byte(s, s->manf_id, true);
+        nand_pushio_byte(s, s->chip_id, true);
         nand_pushio_byte(s, 'Q'); /* Don't-care byte (often 0xa5) */
         if (nand_flash_ids[s->chip_id].options & NAND_SAMSUNG_LP) {
             /* Page Size, Block Size, Spare Size; bit 6 indicates
              * 8 vs 16 bit width NAND.
              */
-            nand_pushio_byte(s, (s->buswidth == 2) ? 0x55 : 0x15);
+            nand_pushio_byte(s, (s->buswidth == 2) ? 0x55 : 0x15, true);
         } else {
-            nand_pushio_byte(s, 0xc0); /* Multi-plane */
+            nand_pushio_byte(s, 0xc0, true); /* Multi-plane */
         }
         break;
     case NAND_CMD_READ_PARAMETER_PAGE:
@@ -405,7 +416,8 @@ static void nand_command(NANDFlashState *s)
         /* Copy Required number of parameter Pages */
         for (j = 0; j < num_parameter_pages; ++j) {
             for (i = 0; i < MAX_PARM_PAGE_SIZE; ++i) {
-                nand_pushio_byte(s, nand_flash_ids[s->chip_id].param_page[i]);
+                nand_pushio_byte(s, nand_flash_ids[s->chip_id].param_page[i],
+				 false);
             }
         }
 
@@ -413,7 +425,8 @@ static void nand_command(NANDFlashState *s)
         for (j = 0; j < num_parameter_pages; ++j) {
             for (i = MAX_PARM_PAGE_SIZE; \
                 i < (MAX_PARM_PAGE_SIZE + MAX_EXT_PARM_PAGE_SIZE); ++i) {
-                nand_pushio_byte(s, nand_flash_ids[s->chip_id].param_page[i]);
+                nand_pushio_byte(s, nand_flash_ids[s->chip_id].param_page[i],
+				 false);
             }
         }
         break;
@@ -461,7 +474,7 @@ static void nand_command(NANDFlashState *s)
     case NAND_CMD_READSTATUS:
         s->ioaddr = s->io;
         s->iolen = 0;
-        nand_pushio_byte(s, s->status);
+        nand_pushio_byte(s, s->status, false);
         break;
 
     default:
@@ -737,11 +750,31 @@ void nand_setio(DeviceState *dev, uint32_t value)
     }
 }
 
+static uint32_t nand_readreg(NANDFlashState *s)
+{
+    int offset;
+    uint32_t x = 0;
+
+    if (s->ce || s->reglen <= 0) {
+        return 0;
+    }
+
+    for (offset = s->buswidth; offset--;) {
+        x |= s->regaddr[offset] << (offset << 3);
+    }
+    s->reglen -= s->buswidth;
+    s->regaddr += s->buswidth;
+    return x;
+}
+
 uint32_t nand_getio(DeviceState *dev)
 {
     int offset;
     uint32_t x = 0;
     NANDFlashState *s = NAND(dev);
+
+    if (s->cmd == NAND_CMD_READID) {
+        return nand_readreg(s);
 
     /* Allow sequential reading */
     if (!s->iolen && s->cmd == NAND_CMD_READ0) {
