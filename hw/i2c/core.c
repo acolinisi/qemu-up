@@ -155,7 +155,9 @@ int i2c_start_transfer(I2CBus *bus, uint8_t address, int recv)
             }
         }
         if (sc->decode_address) {
-            sc->decode_address(s, address);
+            if (sc->decode_address(node->elt, address)) {
+                return 1;
+            }
         }
     }
     return 0;
