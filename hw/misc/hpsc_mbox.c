@@ -231,6 +231,37 @@ static void bcm2835_mbox_write(void *opaque, hwaddr offset,
                       __func__, 1, s->mbox[1].config);
         break;
 
+    case 0x80 ... 0x8c: /* MAIL0_WRITE */
+        if (s->mbox[0].status & ARM_MS_FULL) {
+            /* Mailbox full */
+            qemu_log_mask(LOG_GUEST_ERROR, "%s: mailbox full\n", __func__);
+        } else {
+            ch = value & 0xf;
+            if (ch < MBOX_CHAN_COUNT) {
+                childaddr = ch << MBOX_AS_CHAN_SHIFT;
+#if 0
+                if (ldl_le_phys(&s->mbox_as, childaddr + MBOX_AS_PENDING)) {
+#else
+                if (1) {
+#endif
+                    /* Child busy, push delayed. Push it in the arm->vc mbox */
+                    mbox_push(&s->mbox[0], value);
+                    qemu_log_mask(LOG_GUEST_ERROR, "%s: push delayed: val %lx\n",
+                                  __func__, value);
+                } else {
+                    /* Push it directly to the child device */
+                    stl_le_phys(&s->mbox_as, childaddr, value);
+                    qemu_log_mask(LOG_GUEST_ERROR, "%s: pushed to child: val %lx\n",
+                                  __func__, value);
+                }
+            } else {
+                /* Invalid channel number */
+                qemu_log_mask(LOG_GUEST_ERROR, "%s: invalid channel %u\n",
+                              __func__, ch);
+            }
+        }
+        break;
+
     case 0xa0 ... 0xac: /* MAIL1_WRITE */
         if (s->mbox[1].status & ARM_MS_FULL) {
             /* Mailbox full */
