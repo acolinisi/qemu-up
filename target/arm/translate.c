@@ -27,6 +27,7 @@
 #include "tcg-op.h"
 #include "tcg-op-gvec.h"
 #include "qemu/log.h"
+#include "qemu/error-report.h"
 #include "qemu/bitops.h"
 #include "arm_ldst.h"
 #include "exec/semihost.h"
@@ -11706,6 +11707,29 @@ static void disas_thumb2_insn(DisasContext *s, uint32_t insn)
     case 6: case 7: case 14: case 15:
         /* Coprocessor.  */
         if (arm_dc_feature(s, ARM_FEATURE_M)) {
+#if 1 /* TODO: preserve the NOCP behavior (see comment in else clause) */
+         if (arm_dc_feature(s, ARM_FEATURE_VFP4)) {
+           if (!s->vfp_enabled) {
+              warn_report("FP coprocessor is not enabled");
+              gen_exception_insn(s, 4, EXCP_NOCP, syn_uncategorized(),
+                               default_exception_el(s));
+              break;
+           } else {
+             if (s->fp_excp_el > s->current_el) {
+                warn_report("FP instruction cannot be executed at this EL");
+                gen_exception_insn(s, 4, EXCP_NOCP, syn_uncategorized(),
+                                 default_exception_el(s));
+                break;
+             }
+           }
+         }
+         else {
+            warn_report("FP coprocessor doesn't exist");
+            gen_exception_insn(s, 4, EXCP_NOCP, syn_uncategorized(),
+                               default_exception_el(s));
+            break;
+         }
+#else
             /* We don't currently implement M profile FP support,
              * so this entire space should give a NOCP fault, with
              * the exception of the v8M VLLDM and VLSTM insns, which
@@ -11727,6 +11751,7 @@ static void disas_thumb2_insn(DisasContext *s, uint32_t insn)
             gen_exception_insn(s, 4, EXCP_NOCP, syn_uncategorized(),
                                default_exception_el(s));
             break;
+#endif
         }
         if ((insn & 0xfe000a00) == 0xfc000800
             && arm_dc_feature(s, ARM_FEATURE_V8)) {
@@ -13289,6 +13314,21 @@ static void arm_tr_init_disas_context(DisasContextBase *dcbase, CPUState *cs)
     dc->ns = FIELD_EX32(tb_flags, TBFLAG_A32, NS);
     dc->fp_excp_el = FIELD_EX32(tb_flags, TBFLAG_ANY, FPEXC_EL);
     dc->vfp_enabled = FIELD_EX32(tb_flags, TBFLAG_A32, VFPEN);
+    if (arm_feature(env, ARM_FEATURE_V7) && arm_feature(env, ARM_FEATURE_M) ) {
+      if (arm_feature(env, ARM_FEATURE_VFP4)) { /* cortex-m4f */
+        if (((env->vfp.cpacr >> 20) & 1) == 0)
+            dc->vfp_enabled = 0;
+        else {
+            dc->vfp_enabled = 1;
+            if (((env->vfp.cpacr >> 20) & 1) == 1)
+                 dc->fp_excp_el = 0;
+            else
+                 dc->fp_excp_el = 1;
+        }
+      } else {
+            dc->vfp_enabled = 0;
+      }
+    }
     dc->vec_len = FIELD_EX32(tb_flags, TBFLAG_A32, VECLEN);
     dc->vec_stride = FIELD_EX32(tb_flags, TBFLAG_A32, VECSTRIDE);
     dc->c15_cpar = FIELD_EX32(tb_flags, TBFLAG_A32, XSCALE_CPAR);

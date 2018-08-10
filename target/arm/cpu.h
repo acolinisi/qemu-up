@@ -612,6 +612,12 @@ typedef struct CPUARMState {
         float_status fp_status_f16;
         float_status standard_fp_status;
 
+        uint32_t cpacr;	/* coprocessor access control register, addr: 0xE000ED88 */
+        uint32_t fpccr;	/* floating-point context control register, addr: 0xE000EF34 */
+        uint32_t fpcar;	/* floating-point context address register, addr: 0xE000EF38 */
+        uint32_t fpdscr; /* floating-point default status control register, addr: 0xE000EF3C */
+        MemoryRegion * mm_m4f;
+
         /* ZCR_EL[1-3] */
         uint64_t zcr_el[4];
     } vfp;

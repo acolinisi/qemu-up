@@ -23,6 +23,9 @@
 
 #define ARM_CPU_FREQ 1000000000 /* FIXME: 1 GHz, should be configurable */
 
+#define V7M_BASE_FRAME_SIZE     0x20
+#define V7M_VFP_FRAME_SIZE      0x48
+
 #ifndef CONFIG_USER_ONLY
 /* Cacheability and shareability attributes for a memory access */
 typedef struct ARMCacheAttrs {
@@ -7684,6 +7687,25 @@ pend_fault:
     return false;
 }
 
+static bool v7m_stack_write64(ARMCPU *cpu, uint32_t addr, uint64_t value,
+                              ARMMMUIdx mmu_idx, bool ignfault)
+{
+    return v7m_stack_write(cpu, addr, value >> 32, mmu_idx, ignfault) &&
+           v7m_stack_write(cpu, addr + 4, value & 0xffffffff, mmu_idx, ignfault);
+}
+
+static bool v7m_stack_read64(ARMCPU *cpu, uint64_t *dest, uint32_t addr,
+                           ARMMMUIdx mmu_idx)
+{
+    uint32_t dest_lo, dest_hi;
+    bool r;
+    r = v7m_stack_read(cpu, &dest_hi, addr, mmu_idx) &&
+        v7m_stack_read(cpu, &dest_lo, addr + 4, mmu_idx);
+    *dest = ((uint64_t)dest_hi << 32) | dest_lo;
+    return r;
+}
+
+
 /* Write to v7M CONTROL.SPSEL bit for the specified security bank.
  * This may change the current stack pointer between Main and Process
  * stack pointers if it is done for the CONTROL register for the current
@@ -8181,7 +8203,10 @@ static bool v7m_push_stack(ARMCPU *cpu)
         xpsr |= XPSR_SPREALIGN;
     }
 
-    frameptr -= 0x20;
+    frameptr -= V7M_BASE_FRAME_SIZE;
+    if (arm_feature(env, ARM_FEATURE_VFP)) {
+        frameptr -= V7M_VFP_FRAME_SIZE;
+    }
 
     if (arm_feature(env, ARM_FEATURE_V8)) {
         uint32_t limit = v7m_sp_limit(env);
@@ -8218,6 +8243,32 @@ static bool v7m_push_stack(ARMCPU *cpu)
         v7m_stack_write(cpu, frameptr + 24, env->regs[15], mmu_idx, false) &&
         v7m_stack_write(cpu, frameptr + 28, xpsr, mmu_idx, false);
 
+    /* Regardless of Lazy stacking setting, just push all FP registers */
+    if (arm_feature(env, ARM_FEATURE_VFP)) { /* number of registers hardcoded above */
+        uint32_t vfp_frameptr = frameptr + V7M_BASE_FRAME_SIZE;
+
+        env->vfp.fpcar = vfp_frameptr - 4; /* pointer to S15. TODO: Is it correct? */
+
+        if (arm_current_el(env) == 1) { /* thread mode */
+          env->vfp.fpccr |= (1 << 3);
+          env->vfp.fpccr &= ~(1 << 1);
+        } else { /* user mode */
+          env->vfp.fpccr |= (1 << 1);
+          env->vfp.fpccr &= ~(1 << 3);
+        }
+
+        stacked_ok = stacked_ok &&
+            v7m_stack_write64(cpu, vfp_frameptr +  0x0, env->vfp.zregs[0].d[0], mmu_idx, false) &&
+            v7m_stack_write64(cpu, vfp_frameptr +  0x8, env->vfp.zregs[1].d[0], mmu_idx, false) &&
+            v7m_stack_write64(cpu, vfp_frameptr + 0x10, env->vfp.zregs[2].d[0], mmu_idx, false) &&
+            v7m_stack_write64(cpu, vfp_frameptr + 0x18, env->vfp.zregs[3].d[0], mmu_idx, false) &&
+            v7m_stack_write64(cpu, vfp_frameptr + 0x20, env->vfp.zregs[4].d[0], mmu_idx, false) &&
+            v7m_stack_write64(cpu, vfp_frameptr + 0x28, env->vfp.zregs[5].d[0], mmu_idx, false) &&
+            v7m_stack_write64(cpu, vfp_frameptr + 0x30, env->vfp.zregs[6].d[0], mmu_idx, false) &&
+            v7m_stack_write64(cpu, vfp_frameptr + 0x38, env->vfp.zregs[7].d[0], mmu_idx, false) &&
+            v7m_stack_write(cpu, vfp_frameptr + 0x40, vfp_get_fpscr(env), mmu_idx, false);
+    }
+
     /* Update SP regardless of whether any of the stack accesses failed. */
     env->regs[13] = frameptr;
 
@@ -8229,6 +8280,7 @@ static void do_v7m_exception_exit(ARMCPU *cpu)
     CPUARMState *env = &cpu->env;
     uint32_t excret;
     uint32_t xpsr;
+    uint32_t fpscr;
     bool ufault = false;
     bool sfault = false;
     bool return_to_sp_process;
@@ -8486,6 +8538,20 @@ static void do_v7m_exception_exit(ARMCPU *cpu)
             v7m_stack_read(cpu, &env->regs[15], frameptr + 0x18, mmu_idx) &&
             v7m_stack_read(cpu, &xpsr, frameptr + 0x1c, mmu_idx);
 
+        if (arm_feature(env, ARM_FEATURE_VFP)) {
+            uint32_t vfp_frameptr = frameptr + V7M_BASE_FRAME_SIZE;
+            pop_ok = pop_ok &&
+                v7m_stack_read64(cpu, &env->vfp.zregs[0].d[0], vfp_frameptr + 0x00, mmu_idx) &&
+                v7m_stack_read64(cpu, &env->vfp.zregs[1].d[0], vfp_frameptr + 0x08, mmu_idx) &&
+                v7m_stack_read64(cpu, &env->vfp.zregs[2].d[0], vfp_frameptr + 0x10, mmu_idx) &&
+                v7m_stack_read64(cpu, &env->vfp.zregs[3].d[0], vfp_frameptr + 0x18, mmu_idx) &&
+                v7m_stack_read64(cpu, &env->vfp.zregs[4].d[0], vfp_frameptr + 0x20, mmu_idx) &&
+                v7m_stack_read64(cpu, &env->vfp.zregs[5].d[0], vfp_frameptr + 0x28, mmu_idx) &&
+                v7m_stack_read64(cpu, &env->vfp.zregs[6].d[0], vfp_frameptr + 0x30, mmu_idx) &&
+                v7m_stack_read64(cpu, &env->vfp.zregs[7].d[0], vfp_frameptr + 0x38, mmu_idx) &&
+                v7m_stack_read(cpu, &fpscr, vfp_frameptr + 0x40, mmu_idx);
+        }
+
         if (!pop_ok) {
             /* v7m_stack_read() pended a fault, so take it (as a tail
              * chained exception on the same stack frame)
@@ -8536,7 +8602,11 @@ static void do_v7m_exception_exit(ARMCPU *cpu)
         }
 
         /* Commit to consuming the stack frame */
-        frameptr += 0x20;
+        frameptr += V7M_BASE_FRAME_SIZE;
+        if (arm_feature(env, ARM_FEATURE_VFP)) {
+            frameptr += V7M_VFP_FRAME_SIZE;
+        }
+
         /* Undo stack alignment (the SPREALIGN bit indicates that the original
          * pre-exception SP was not 8-aligned and we added a padding word to
          * align it, so we undo this by ORing in the bit that increases it
@@ -8548,6 +8618,11 @@ static void do_v7m_exception_exit(ARMCPU *cpu)
         }
         *frame_sp_p = frameptr;
     }
+
+    if (arm_feature(env, ARM_FEATURE_VFP)) {
+        vfp_set_fpscr(env, fpscr);
+    }
+
     /* This xpsr_write() will invalidate frame_sp_p as it may switch stack */
     xpsr_write(env, xpsr, ~XPSR_SPREALIGN);
 

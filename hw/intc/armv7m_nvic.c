@@ -1872,6 +1872,28 @@ static MemTxResult nvic_sysreg_read(void *opaque, hwaddr addr,
         val |= s->cpu->env.v7m.cfsr[M_REG_NS] & R_V7M_CFSR_BFSR_MASK;
         val = extract32(val, (offset - 0xd28) * 8, size * 8);
         break;
+    case 0xd88: /* Coprocessor Access Control Register */
+    case 0xf34 ... 0xf44: /* Floating Point system registers */
+        {
+            CPUARMState *env = &s->cpu->env;
+            switch (offset) {
+               case 0xd88:
+                 val = env->vfp.cpacr;
+                 break;
+               case 0xf34:
+                 val = env->vfp.fpccr;
+                 break;
+               case 0xf38:
+                 val = env->vfp.fpcar;
+                 break;
+               case 0xf3c:
+                 val = env->vfp.fpdscr;
+                 break;
+               default:
+                 assert("FPU register not implemented");
+            }
+            break;
+        }
     case 0xfe0 ... 0xfff: /* ID.  */
         if (offset & 3) {
             val = 0;
@@ -1992,6 +2014,28 @@ static MemTxResult nvic_sysreg_write(void *opaque, hwaddr addr,
             s->cpu->env.v7m.cfsr[M_REG_NS] &= ~(value & R_V7M_CFSR_BFSR_MASK);
         }
         return MEMTX_OK;
+    case 0xd88: /* Coprocessor Access Control Register */
+    case 0xf34 ... 0xf44: /* Floating Point system registers */
+        {
+            CPUARMState *env = &s->cpu->env;
+            switch (offset) {
+            case 0xd88:
+                env->vfp.cpacr = value;
+                break;
+            case 0xf34:
+                env->vfp.fpccr = value;
+                break;
+            case 0xf38:
+                env->vfp.fpcar = value;
+                break;
+            case 0xf3c:
+                env->vfp.fpdscr = value;
+                break;
+            default:
+                assert("FPU register not implemented");
+            }
+            break;
+        }
     }
     if (size == 4) {
         nvic_writel(s, offset, value, attrs);
