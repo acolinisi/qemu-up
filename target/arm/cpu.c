@@ -1205,7 +1205,10 @@ static void arm_cpu_realizefn(DeviceState *dev, Error **errp)
 #endif
 
     qemu_init_vcpu(cs);
+#if 0 /* Resetting CPU reads memory (to get SP, PC), but memory nodes in DT are not yet initialized.
+	 There's already a reset happening from qemu_system_reset after all loading is complete. */
     cpu_reset(cs);
+#endif
 
     acc->parent_realize(dev, errp);
 }
