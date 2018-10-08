@@ -1,39 +1,39 @@
-/*
- * Raspberry Pi emulation (c) 2012 Gregory Estrade
- * This code is licensed under the GNU GPLv2 and later.
- */
-
 #ifndef HPSC_MBOX_H
 #define HPSC_MBOX_H
 
-#include "hpsc_mbox_defs.h"
 #include "hw/sysbus.h"
+#if 0
 #include "exec/address-spaces.h"
+#endif
 
-#define TYPE_BCM2835_MBOX "hpsc-mbox"
-#define BCM2835_MBOX(obj) \
-        OBJECT_CHECK(BCM2835MboxState, (obj), TYPE_BCM2835_MBOX)
+#define TYPE_HPSC_MBOX "hpsc-mbox"
+#define HPSC_MBOX(obj) \
+        OBJECT_CHECK(HPSCMboxState, (obj), TYPE_HPSC_MBOX)
 
-typedef struct {
-    uint32_t reg[MBOX_SIZE];
-    uint32_t count;
-    uint32_t status;
-    uint32_t config;
-} BCM2835Mbox;
+#define HPSC_MBOX_DATA_REGS 16
+#define HPSC_MBOX_INTS 2
+#define HPSC_MBOX_INSTANCES 32
 
 typedef struct {
-    /*< private >*/
+    uint32_t owner;
+    uint32_t dest;
+    uint32_t int_enabled;
+    uint32_t int_status;
+    uint32_t data[HPSC_MBOX_DATA_REGS];
+    qemu_irq arm_irq[HPSC_MBOX_INTS];
+
+    MemoryRegion iomem;
+} HPSCMboxInstance;
+
+typedef struct {
     SysBusDevice busdev;
-    /*< public >*/
-    MemoryRegion mbox_mr_real;
+#if 0
+    MemoryRegion mbox_mr_real; /* TODO remove */
     MemoryRegion *mbox_mr;
     AddressSpace mbox_as;
-    MemoryRegion iomem;
-    qemu_irq arm_irq[NUM_BOXES];
+#endif
 
-    bool mbox_irq_disabled;
-    bool available[MBOX_CHAN_COUNT];
-    BCM2835Mbox mbox[NUM_BOXES];
-} BCM2835MboxState;
+    HPSCMboxInstance mbox[HPSC_MBOX_INSTANCES];
+} HPSCMboxState;
 
 #endif
