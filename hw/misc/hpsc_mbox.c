@@ -1,27 +1,8 @@
-/*
- * Raspberry Pi emulation (c) 2012 Gregory Estrade
- * This code is licensed under the GNU GPLv2 and later.
- *
- * This file models the system mailboxes, which are used for
- * communication with low-bandwidth GPU peripherals. Refs:
- *   https://github.com/raspberrypi/firmware/wiki/Mailboxes
- *   https://github.com/raspberrypi/firmware/wiki/Accessing-mailboxes
- */
-
 #include "qemu/osdep.h"
 #include "qapi/error.h"
-#include "hw/misc/hpsc_mbox.h"
 #include "qemu/log.h"
 
-
-#define REG_OWNER             0x00
-#define REG_INT_ENABLE        0x04
-#define REG_INT_CAUSE         0x08
-#define REG_INT_STATUS        0x0C
-#define REG_INT_STATUS_CLEAR  0x08 /* TODO: is this overlap by design */
-#define REG_INT_STATUS_SET    0x0C
-#define REG_DESTINATION       0x1C
-#define REG_DATA              0x20
+#include "hw/misc/hpsc_mbox.h"
 
 static void set_int(HPSCMboxInstance *s, uint32_t old_status) {
     unsigned i;
@@ -36,25 +17,21 @@ static void set_int(HPSCMboxInstance *s, uint32_t old_status) {
     }
 }
 
-static bool check_owner(HPSCMboxInstance *s /* TODO memattr_t attr */)
+static bool check_owner(HPSCMboxInstance *si, MemTxAttrs attrs)
 {
-#if 0
-    if (s->owner != attr->master_id /* TODO */) {
+    if (si->owner != attrs.master_id) {
         qemu_log_mask(LOG_GUEST_ERROR, "%s: write to register by non-owner\n", __func__);
         return false;
     }
-#endif
     return true;
 }
 
-static bool check_dest(HPSCMboxInstance *s /* TODO memattr_t attr */)
+static bool check_dest(HPSCMboxInstance *si, MemTxAttrs attrs)
 {
-#if 0
-    if (s->dest != attr->master_id /* TODO */) {
+    if (si->dest != attrs.master_id) {
         qemu_log_mask(LOG_GUEST_ERROR, "%s: write to register by non-destination\n", __func__);
         return false;
     }
-#endif
     return true;
 }
 
@@ -82,87 +59,94 @@ static void hpsc_mbox_reset(DeviceState *dev)
         hpsc_mbox_reset_instance(&s->mbox[i]);
 }
 
-static uint64_t hpsc_mbox_read(void *opaque, hwaddr offset, unsigned size)
+static MemTxResult hpsc_mbox_read(void *opaque, hwaddr offset, uint64_t *r, unsigned size, MemTxAttrs attrs)
 {
-    HPSCMboxInstance *s = opaque;
+    unsigned instance = offset / HPSC_MBOX_INSTANCE_REGION;
+    offset %= HPSC_MBOX_INSTANCE_REGION;
 
-    offset &= 0xff;
+    HPSCMboxState *s = HPSC_MBOX(opaque);
+    HPSCMboxInstance *si = &s->mbox[instance];
 
     /* Allow reads to everyone, including non-owner and non-destination */
 
     switch (offset) {
     case REG_OWNER:
-        return s->owner;
+        *r = si->owner;
+        break;
     case REG_DESTINATION:
-        return s->dest;
+        *r = si->dest;
+        break;
     case REG_INT_ENABLE:
-        return s->int_enabled;
+        *r = si->int_enabled;
+        break;
     case REG_INT_CAUSE:
-        return s->int_status & s->int_enabled;
+        *r = si->int_status & si->int_enabled;
+        break;
     case REG_INT_STATUS:
-        return s->int_status;
+        *r = si->int_status;
+        break;
     default:
         if (offset >= REG_DATA) {
             unsigned reg_idx = offset - REG_DATA;
-            return s->data[reg_idx];
+            *r = si->data[reg_idx];
         } else {
             qemu_log_mask(LOG_GUEST_ERROR, "%s: write to unrecognized register\n", __func__);
         }
     }
-    return 0;
+    return MEMTX_OK;
 }
 
-static void hpsc_mbox_write(void *opaque, hwaddr offset,
-                               uint64_t value, unsigned size)
+static MemTxResult hpsc_mbox_write(void *opaque, hwaddr offset,
+                               uint64_t value, unsigned size, MemTxAttrs attrs)
 {
-    HPSCMboxInstance *s = opaque;
     uint32_t old_status;
     unsigned reg_idx;
 
-    offset &= 0xff;
+    unsigned instance = offset / HPSC_MBOX_INSTANCE_REGION;
+    offset %= HPSC_MBOX_INSTANCE_REGION;
+
+    HPSCMboxState *s = HPSC_MBOX(opaque);
+    HPSCMboxInstance *si = &s->mbox[instance];
 
     switch (offset) {
     case REG_OWNER:
-
-#if 0
-        if (!s->owner && value == attr->master_id /* TODO */) { /* if unclaimed and the writer actually claiming for himself */
-            s->owner = value;
-            if (s->owner = 0)
-                hpsc_mbox_reset_instance(s);
+        if (!si->owner && value == attrs.master_id) { /* if unclaimed and the writer actually claiming for himself */
+            si->owner = value;
+            if (si->owner == 0)
+                hpsc_mbox_reset_instance(si);
         }
-#endif
         break;
     case REG_DESTINATION:
-        if (!check_owner(s))
-            return;
-        s->dest = value;
+        if (!check_owner(si, attrs))
+            return MEMTX_ERROR;
+        si->dest = value;
         break;
     case REG_INT_ENABLE:
-        if (!check_owner(s) && !check_dest(s))
-            return;
-        s->int_enabled = value & 0b11;
+        if (!check_owner(si, attrs) && !check_dest(si, attrs))
+            return MEMTX_ERROR;
+        si->int_enabled = value & 0b11;
         break;
     case REG_INT_STATUS_CLEAR:
-        if (!check_owner(s) && !check_dest(s))
-            return;
-        old_status = s->int_status;
-        s->int_status &= ~value;
-        set_int(s, old_status);
+        if (!check_owner(si, attrs) && !check_dest(si, attrs))
+            return MEMTX_ERROR;
+        old_status = si->int_status;
+        si->int_status &= ~value;
+        set_int(si, old_status);
         break;
     case REG_INT_STATUS_SET:
-        if (!check_owner(s) && !check_dest(s))
-            return;
+        if (!check_owner(si, attrs) && !check_dest(si, attrs))
+            return MEMTX_ERROR;
 
-        old_status = s->int_status;
-        s->int_status |= value;
-        set_int(s, old_status);
+        old_status = si->int_status;
+        si->int_status |= value;
+        set_int(si, old_status);
         break;
     default:
         if (offset >= REG_DATA) {
-            if (!check_owner(s)) /* is destination allowed to write to data regs? assuming no. */
-                return;
+            if (!check_owner(si, attrs)) /* is destination allowed to write to data regs? assuming no. */
+                return MEMTX_ERROR;
             reg_idx = offset - REG_DATA;
-            s->data[reg_idx] = value;
+            si->data[reg_idx] = value;
         } else {
             switch (offset) {
             case REG_INT_CAUSE:
@@ -175,11 +159,13 @@ static void hpsc_mbox_write(void *opaque, hwaddr offset,
             }
         }
     }
+
+    return MEMTX_OK;
 }
 
 static const MemoryRegionOps hpsc_mbox_ops = {
-    .read = hpsc_mbox_read,
-    .write = hpsc_mbox_write,
+    .read_with_attrs = hpsc_mbox_read,
+    .write_with_attrs = hpsc_mbox_write,
     .endianness = DEVICE_NATIVE_ENDIAN,
     .valid.min_access_size = 4,
     .valid.max_access_size = 4,
@@ -218,12 +204,12 @@ static void hpsc_mbox_init(Object *obj)
     HPSCMboxState *s = HPSC_MBOX(obj);
     unsigned i, j;
 
+    memory_region_init_io(&s->iomem, obj, &hpsc_mbox_ops, s,
+                          TYPE_HPSC_MBOX, HPSC_MBOX_INSTANCES * HPSC_MBOX_INSTANCE_REGION);
+    sysbus_init_mmio(SYS_BUS_DEVICE(s), &s->iomem);
+
     for (i = 0; i < HPSC_MBOX_INTS; ++i) {
         HPSCMboxInstance *si = &s->mbox[i];
-
-        memory_region_init_io(&si->iomem, obj, &hpsc_mbox_ops, si,
-                              TYPE_HPSC_MBOX, REG_DATA + HPSC_MBOX_DATA_REGS * 4);
-        sysbus_init_mmio(SYS_BUS_DEVICE(s), &si->iomem);
 
         for (j = 0; j < HPSC_MBOX_INTS; ++j)
             sysbus_init_irq(SYS_BUS_DEVICE(s), &si->arm_irq[j]);
@@ -235,29 +221,6 @@ static void hpsc_mbox_realize(DeviceState *dev, Error **errp)
     HPSCMboxState *s = HPSC_MBOX(dev);
     unsigned i;
 
-#if 0
-    /* Internal memory region for request/response communication with
-     * mailbox-addressable peripherals (not exported)
-     */
-    memory_region_init(&s->mbox_mr_real, OBJECT(dev), "hpsc-mbox",
-                       MBOX_CHAN_COUNT << MBOX_AS_CHAN_SHIFT);
-
-/*
-    object_property_add_const_link(OBJECT(&s->mboxes), "mbox-mr",
-                                   OBJECT(&s->mbox_mr), &error_abort);
-
-    obj = object_property_get_link(OBJECT(dev), "mbox-mr", &err);
-*/
-    obj = OBJECT(&s->mbox_mr_real);
-    if (obj == NULL) {
-        error_setg(errp, "%s: required mbox-mr link not found: %s",
-                   __func__, error_get_pretty(err));
-        return;
-    }
-
-    s->mbox_mr = MEMORY_REGION(obj);
-    address_space_init(&s->mbox_as, s->mbox_mr, NULL);
-#endif
     for (i = 0; i < HPSC_MBOX_INTS; ++i)
         hpsc_mbox_reset_instance(&s->mbox[i]);
 }
