@@ -143,7 +143,7 @@ static MemTxResult hpsc_mbox_write(void *opaque, hwaddr offset,
         break;
     default:
         if (offset >= REG_DATA) {
-            if (!check_owner(si, attrs)) /* is destination allowed to write to data regs? assuming no. */
+            if (!check_owner(si, attrs) && !check_dest(si, attrs))
                 return MEMTX_ERROR;
             reg_idx = offset - REG_DATA;
             si->data[reg_idx] = value;
