@@ -10,8 +10,8 @@ static void set_int(HPSCMboxInstance *s, uint32_t old_status) {
     for (i = 0; i < HPSC_MBOX_INTS; ++i) {
         if ((old_status & (1 << i)) != (s->int_status & (1 << i))) {
             if ((!(s->int_status & (1 << i))) || (s->int_enabled & (1 << i))) { // TODO: is this logic accurate?
-                qemu_log_mask(LOG_GUEST_ERROR, "%s: set irq %u to %u\n", __func__, i, s->int_enabled & (1 << i));
-                qemu_set_irq(s->arm_irq[i], s->int_status & (1 << i));
+                qemu_log_mask(LOG_GUEST_ERROR, "%s: set irq %u to %u\n", __func__, i, !!(s->int_status & (1 << i)));
+                qemu_set_irq(s->arm_irq[i], !!(s->int_status & (1 << i)));
             }
         }
     }
