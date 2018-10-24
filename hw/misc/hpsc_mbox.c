@@ -4,16 +4,25 @@
 
 #include "hw/misc/hpsc_mbox.h"
 
-static void set_int(HPSCMboxState *s, uint32_t instance, uint32_t old_status) {
-    unsigned i;
+static void update_irq(HPSCMboxState *s, unsigned instance)
+{
     HPSCMboxInstance *si = &s->mbox[instance];
+    unsigned int_idx;
 
-    for (i = 0; i < HPSC_MBOX_INTS; ++i) {
-        if (si->int_enabled & (1 << i)) {
-            bool intval = !!(si->int_status & (1 << i));
+    // For now, we resolve the mapping here, every time. Alternatively, we
+    // could resolve the mapping upon write to Interrupt Enable register, store
+    // it in the instance state, and simply set the state of the saved irq here.
 
-            qemu_log_mask(LOG_GUEST_ERROR, "%s: instance %u: set irq %u to %u\n", __func__, instance, i, intval);
-            qemu_set_irq(si->arm_irq[i], intval);
+    for (int_idx = 0; int_idx < HPSC_MBOX_INTS; ++int_idx) {
+        unsigned event_mask = (si->int_enable >> (2 * int_idx)) & HPSC_MBOX_EVENTS_MASK;
+        if (event_mask) { // are any events mapped to this interrupt?
+
+            // Are any *of the mapped events* raised?
+            bool intval = !!(si->event_status & event_mask);
+
+            qemu_log_mask(LOG_GUEST_ERROR, "%s: instance %u event mask %x: set irq %u to %u\n",
+                          __func__, instance, event_mask, int_idx, intval);
+            qemu_set_irq(s->arm_irq[int_idx], intval);
         }
     }
 }
@@ -43,16 +52,14 @@ static bool check_owner_or_dest(HPSCMboxInstance *si, MemTxAttrs attrs, const ch
 static void hpsc_mbox_reset_instance(HPSCMboxState *s, unsigned instance)
 {
     unsigned i;
-
     HPSCMboxInstance *si = &s->mbox[instance];
 
     si->owner = 0;
+    si->src = 0;
     si->dest = 0;
-    si->int_enabled = 0;
-   
-    uint32_t old_status = si->int_status;
-    si->int_status  = 0;
-    set_int(s, instance, old_status);
+    si->unsecure = false;
+    si->event_status = 0;
+    si->int_enable = 0;
 
     for (i = 0; i < HPSC_MBOX_DATA_REGS; ++i)
         si->data[i] = 0;
@@ -61,16 +68,17 @@ static void hpsc_mbox_reset_instance(HPSCMboxState *s, unsigned instance)
 static void hpsc_mbox_reset(DeviceState *dev)
 {
     HPSCMboxState *s = HPSC_MBOX(dev);
-    unsigned i, j;
-    for (i = 0; i < HPSC_MBOX_INSTANCES; ++i) {
+    unsigned i, int_idx;
+    for (i = 0; i < HPSC_MBOX_INSTANCES; ++i)
         hpsc_mbox_reset_instance(s, i);
-        for (j = 0; j < HPSC_MBOX_INTS; ++j)
-            qemu_set_irq(s->mbox[i].arm_irq[j], 0);
-    }
+    for (int_idx = 0; int_idx < HPSC_MBOX_INTS; ++int_idx)
+        qemu_set_irq(s->arm_irq[int_idx], 0);
 }
 
 static MemTxResult hpsc_mbox_read(void *opaque, hwaddr offset, uint64_t *r, unsigned size, MemTxAttrs attrs)
 {
+    uint64_t ie;
+    uint32_t int_idx;
     unsigned instance = offset / HPSC_MBOX_INSTANCE_REGION;
     offset %= HPSC_MBOX_INSTANCE_REGION;
 
@@ -80,20 +88,25 @@ static MemTxResult hpsc_mbox_read(void *opaque, hwaddr offset, uint64_t *r, unsi
     /* Allow reads to everyone, including non-owner and non-destination */
 
     switch (offset) {
-    case REG_OWNER:
-        *r = si->owner;
-        break;
-    case REG_DESTINATION:
-        *r = si->dest;
+    case REG_CONFIG:
+        *r = ((si->owner << REG_CONFIG__OWNER__SHIFT) & REG_CONFIG__OWNER__MASK) |
+             ((si->src   << REG_CONFIG__SRC__SHIFT)   & REG_CONFIG__SRC__MASK) |
+             ((si->dest  << REG_CONFIG__DEST__SHIFT)  & REG_CONFIG__DEST__MASK) |
+             (si->unsecure ? REG_CONFIG__UNSECURE : 0);
         break;
     case REG_INT_ENABLE:
-        *r = si->int_enabled;
+        *r = si->int_enable;
         break;
-    case REG_INT_CAUSE:
-        *r = si->int_status & si->int_enabled;
+    case REG_EVENT_STATUS:
+        *r = si->event_status;
         break;
-    case REG_INT_STATUS:
-        *r = si->int_status;
+    case REG_EVENT_CAUSE:
+        // If the events are mapped to any interrupt, then cause bits are set
+        ie = 0;
+        for (int_idx = 0; int_idx < HPSC_MBOX_INTS; ++int_idx)
+            ie |= (si->int_enable >> (2 * int_idx)) & HPSC_MBOX_EVENTS_MASK;
+        *r = si->event_status & ie;
+        qemu_log_mask(LOG_GUEST_ERROR, "%s: %p: cause: event_status %x cause %lx\n", __func__, si, si->event_status, *r);
         break;
     default:
         if (offset >= REG_DATA) {
@@ -110,7 +123,8 @@ static MemTxResult hpsc_mbox_read(void *opaque, hwaddr offset, uint64_t *r, unsi
 static MemTxResult hpsc_mbox_write(void *opaque, hwaddr offset,
                                uint64_t value, unsigned size, MemTxAttrs attrs)
 {
-    uint32_t old_status;
+    uint32_t owner, src, dest;
+    bool unsecure;
     unsigned reg_idx;
 
     unsigned instance = offset / HPSC_MBOX_INSTANCE_REGION;
@@ -120,47 +134,48 @@ static MemTxResult hpsc_mbox_write(void *opaque, hwaddr offset,
     HPSCMboxInstance *si = &s->mbox[instance];
 
     switch (offset) {
-    case REG_OWNER:
-        if (value) { // claiming
+    case REG_CONFIG:
+        owner = (value & REG_CONFIG__OWNER__MASK) >> REG_CONFIG__OWNER__SHIFT;
+        src   = (value & REG_CONFIG__SRC__MASK)   >> REG_CONFIG__SRC__SHIFT;
+        dest  = (value & REG_CONFIG__DEST__MASK)  >> REG_CONFIG__DEST__SHIFT;
+        unsecure = value & REG_CONFIG__UNSECURE; // TODO: enforce
+        if (owner) { // claiming
             if (!si->owner /* && value == attrs.master_id */) { /* if unclaimed and the writer actually claiming for himself */
-                si->owner = value;
+                si->owner = owner;
+                si->src = src;
+                si->dest = dest;
+                si->unsecure = unsecure;
             } else if (si->owner) {
-                qemu_log_mask(LOG_GUEST_ERROR, "%s: cannot claim for %lx: already claimed by %x\n", __func__, value, si->owner);
+                qemu_log_mask(LOG_GUEST_ERROR, "%s: cannot claim for %x: already claimed by %x\n",
+                              __func__, owner, si->owner);
             } else {
-                qemu_log_mask(LOG_GUEST_ERROR, "%s: cannot claim on behalf of another bus master %lx (self %lx)\n",
-                              __func__, value, attrs.master_id);
+                qemu_log_mask(LOG_GUEST_ERROR, "%s: cannot claim on behalf of another bus master %x (self %lx)\n",
+                              __func__, owner, attrs.master_id);
             }
         } else { // releasing
-            if (value || !check_owner(si, attrs, "OWNER"))
+            if (owner || !check_owner(si, attrs, "OWNER"))
                 return MEMTX_ERROR;
-            si->owner = 0;
             hpsc_mbox_reset_instance(s, instance);
         }
         break;
-    case REG_DESTINATION:
-        if (!check_owner(si, attrs, "DESTINATION"))
+    case REG_INT_ENABLE: // bit 2*K+X maps event X to interrupt K
+        if (!check_owner_or_dest(si, attrs, "EVENT_ENABLE"))
             return MEMTX_ERROR;
-        si->dest = value;
+        si->int_enable = value;
         break;
-    case REG_INT_ENABLE:
-        if (!check_owner_or_dest(si, attrs, "INT_ENABLE"))
+    case REG_EVENT_CLEAR:
+        if (!check_owner_or_dest(si, attrs, "EVENT_CLEAR"))
             return MEMTX_ERROR;
-        si->int_enabled = value & 0b11;
+        si->event_status &= ~value;
+        qemu_log_mask(LOG_GUEST_ERROR, "%s: event_status %x\n", __func__, si->event_status);
+        update_irq(s, instance);
         break;
-    case REG_INT_STATUS_CLEAR:
-        if (!check_owner_or_dest(si, attrs, "INT_STATUS_CLEAR"))
+    case REG_EVENT_SET:
+        if (!check_owner_or_dest(si, attrs, "EVENT_SET"))
             return MEMTX_ERROR;
-        old_status = si->int_status;
-        si->int_status &= ~value;
-        set_int(s, instance, old_status);
-        break;
-    case REG_INT_STATUS_SET:
-        if (!check_owner_or_dest(si, attrs, "INT_STATUS_SET"))
-            return MEMTX_ERROR;
-
-        old_status = si->int_status;
-        si->int_status |= value;
-        set_int(s, instance, old_status);
+        si->event_status |= value;
+        qemu_log_mask(LOG_GUEST_ERROR, "%s: event_status %x\n", __func__, si->event_status);
+        update_irq(s, instance);
         break;
     default:
         if (offset >= REG_DATA) {
@@ -172,13 +187,13 @@ static MemTxResult hpsc_mbox_write(void *opaque, hwaddr offset,
             qemu_log_mask(LOG_GUEST_ERROR, "%s: wrote data[%lx|%u] <- %x\n", __func__, offset, reg_idx, (uint32_t)value);
         } else {
             switch (offset) {
-            case REG_INT_CAUSE:
-            case REG_INT_STATUS:
-            // TODO: throw exception?
-            qemu_log_mask(LOG_GUEST_ERROR, "%s: write to RO register\n", __func__);
-            break;
-            default:
-            qemu_log_mask(LOG_GUEST_ERROR, "%s: write to unrecognized register\n", __func__);
+                case REG_EVENT_CAUSE:
+                case REG_EVENT_STATUS:
+                    // TODO: throw exception?
+                    qemu_log_mask(LOG_GUEST_ERROR, "%s: write to RO register\n", __func__);
+                    break;
+                default:
+                     qemu_log_mask(LOG_GUEST_ERROR, "%s: write to unrecognized register\n", __func__);
             }
         }
     }
@@ -202,8 +217,10 @@ static const VMStateDescription vmstate_hpsc_mbox_box = {
     .fields = (VMStateField[]) {
         VMSTATE_UINT32(owner, HPSCMboxInstance),
         VMSTATE_UINT32(dest, HPSCMboxInstance),
-        VMSTATE_UINT32(int_enabled, HPSCMboxInstance),
-        VMSTATE_UINT32(int_status, HPSCMboxInstance),
+        VMSTATE_UINT32(src, HPSCMboxInstance),
+        VMSTATE_UINT32(dest, HPSCMboxInstance),
+        VMSTATE_UINT32(int_enable, HPSCMboxInstance),
+        VMSTATE_UINT32(event_status, HPSCMboxInstance),
         VMSTATE_UINT32_ARRAY(data, HPSCMboxInstance, HPSC_MBOX_DATA_REGS),
         VMSTATE_END_OF_LIST()
     }
@@ -225,15 +242,14 @@ static const VMStateDescription vmstate_hpsc_mbox = {
 static void hpsc_mbox_init(Object *obj)
 {
     HPSCMboxState *s = HPSC_MBOX(obj);
-    unsigned i, j;
+    unsigned int_idx;
 
     memory_region_init_io(&s->iomem, obj, &hpsc_mbox_ops, s,
                           TYPE_HPSC_MBOX, HPSC_MBOX_INSTANCES * HPSC_MBOX_INSTANCE_REGION);
     sysbus_init_mmio(SYS_BUS_DEVICE(s), &s->iomem);
 
-    for (i = 0; i < HPSC_MBOX_INSTANCES; ++i)
-        for (j = 0; j < HPSC_MBOX_INTS; ++j)
-            sysbus_init_irq(SYS_BUS_DEVICE(s), &s->mbox[i].arm_irq[j]);
+    for (int_idx = 0; int_idx < HPSC_MBOX_INTS; ++int_idx)
+        sysbus_init_irq(SYS_BUS_DEVICE(s), &s->arm_irq[int_idx]);
 }
 
 static void hpsc_mbox_realize(DeviceState *dev, Error **errp)
