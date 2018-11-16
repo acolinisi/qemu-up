@@ -1690,6 +1690,7 @@ static void cortex_r52f_initfn(Object *obj)
     set_feature(&cpu->env, ARM_FEATURE_PMSA);
     set_feature(&cpu->env, ARM_FEATURE_MPIDR);
     set_feature(&cpu->env, ARM_FEATURE_PMU);	/* DK added: R52 supports it, I'm not sure if Qemu supports that */
+    set_feature(&cpu->env, ARM_FEATURE_GENERIC_TIMER);
     cpu->midr = 0x410FD130 ; /* r1p3 */
     cpu->revidr = 0x00000000;
     cpu->isar.mvfr0 = 0x10110222;
