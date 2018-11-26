@@ -179,10 +179,33 @@ static void set_enabled_state(HPSCWDTimer *s, bool enabled)
 
 static void timer_reload(HPSCWDTimer *s, unsigned stage)
 {
+    unsigned st;
     qemu_log("%s: stage %u: reload count <- %lx\n",
             object_get_canonical_path(OBJECT(s)),
             stage, s->terminals[stage]);
+
+    // Stop downstream stages. The stopping has to be the responsibility of HW,
+    // because CLEAR cmd (even though it's per-stage) does not stop the timer.
+
+    // We have to temporarily stop and restart the current stage in order to
+    // make the stopping of downstream stages and reloading of the current
+    // stage atomic; otherwise after we stop the downstream stages, the currents
+    // stage might expire and start a downstream stage, which would cause us to
+    // exit this method with multiple stages counting, which violates our
+    // invariant that only one timer is ever ticking at any given time.
+    bool enabled = s->enabled;
+    if (enabled) {
+        ptimer_stop(s->ptimers[stage]);
+
+        for (st = NUM_STAGES - 1; st > stage; --st)
+            ptimer_stop(s->ptimers[st]);
+    }
+
     ptimer_set_count(s->ptimers[stage], s->terminals[stage]);
+
+    assert(s->enabled == enabled);
+    if (enabled)
+        ptimer_run(s->ptimers[stage], PTIMER_MODE_ONE_SHOT);
 }
 
 static void timer_adjust(HPSCWDTimer *s, unsigned stage, uint32_t terminal)
