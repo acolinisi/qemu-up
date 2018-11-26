@@ -507,7 +507,7 @@ REGS_INFO_STAGE(3)
 
     { .name = "REG_CONFIG",
         .decode.addr = A_REG_CONFIG,
-        .reset = 0x1, // EN | TICKDIV=0(=> /1) // TODO: use macros?
+        .reset = 0x0,
         .rsvd = ~(R_REG_CONFIG_EN_MASK | R_REG_CONFIG_TICKDIV_MASK),
         .pre_write = pre_write_config,
         .post_write = post_write_config,
