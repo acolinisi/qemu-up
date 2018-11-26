@@ -258,7 +258,9 @@ static void timer_tick(void *opaque)
     update_irq(s, stage, 1);
 
     if (stage < NUM_STAGES - 1) {
-        ptimer_run(s->ptimers[stage + 1], PTIMER_MODE_ONE_SHOT);
+        unsigned next_stage = stage + 1;
+        ptimer_set_count(s->ptimers[next_stage], s->terminals[next_stage]);
+        ptimer_run(s->ptimers[next_stage], PTIMER_MODE_ONE_SHOT);
     } else { // last stage
         set_enabled_state(s, false);
     }
