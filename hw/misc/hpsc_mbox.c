@@ -162,6 +162,8 @@ static MemTxResult hpsc_mbox_write(void *opaque, hwaddr offset,
         if (!check_owner_or_dest(si, attrs, "EVENT_ENABLE"))
             return MEMTX_ERROR;
         si->int_enable = value;
+        qemu_log_mask(LOG_GUEST_ERROR, "%s: int_enable %x\n", __func__, si->int_enable);
+        update_irq(s, instance);
         break;
     case REG_EVENT_CLEAR:
         if (!check_owner_or_dest(si, attrs, "EVENT_CLEAR"))
