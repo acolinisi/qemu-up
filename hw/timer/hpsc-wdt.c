@@ -7,12 +7,14 @@
 #include "qemu/timer.h"
 #include "qemu/main-loop.h"
 #include "hw/ptimer.h"
+#include "hw/fdt_generic_util.h"
 
 #ifndef HPSC_WDT_TIMER_ERR_DEBUG
 #define HPSC_WDT_TIMER_ERR_DEBUG 1
 #endif
 
 #define TYPE_HPSC_WDT_TIMER "hpsc,hpsc-wdt"
+#define GPIO_NAME_LAST_TIMEOUT "LAST_TIMEOUT"
 
 #define HPSC_WDT_TIMER(obj) \
      OBJECT_CHECK(HPSCWDTimer, (obj), TYPE_HPSC_WDT_TIMER)
@@ -142,6 +144,9 @@ typedef struct HPSCWDTimer {
     qemu_irq irqs[NUM_STAGES];
     uint64_t terminals[NUM_STAGES];
 
+    // same as irqs[NUM_STAGES-1] but as GPIO, for driving RESET input on CPU
+    qemu_irq last_timeout_gpio;
+
     bool enabled;
     uint64_t tick_offset;
 
@@ -158,6 +163,9 @@ static void update_irq(HPSCWDTimer *s, unsigned stage, bool set)
     else
         s->regs[R_REG_STATUS] &= ~status_bit;
     qemu_set_irq(s->irqs[stage], set);
+
+    if (stage == NUM_STAGES - 1)
+        qemu_set_irq(s->last_timeout_gpio, set);
 }
 
 static uint64_t get_staging_terminal(HPSCWDTimer *s, unsigned stage) {
@@ -521,8 +529,8 @@ static void hpsc_wdt_reset(DeviceState *dev)
                 object_get_canonical_path(OBJECT(s)),
                 stage, s->terminals[stage]);
         timer_reload(s, stage);
+        update_irq(s, stage, 0);
     }
-
 }
 
 static uint64_t hpsc_wdt_read(void *opaque, hwaddr addr, unsigned size)
@@ -597,6 +605,8 @@ static void timer_tick(void *opaque)
         ptimer_run(s->ptimers[next_stage], PTIMER_MODE_ONE_SHOT);
     } else { // last stage
         set_enabled_state(s, false);
+        if (s->last_timeout_gpio) // whether hooked up determines behavior
+            hpsc_wdt_reset((DeviceState *)s);
     }
     // ptimer already disabled because it is one shot
 }
@@ -608,6 +618,17 @@ static const MemoryRegionOps hpsc_wdt_ops = {
         .min_access_size = 4,
         .max_access_size = 4,
     },
+};
+
+static const FDTGenericGPIOSet wdt_gpios[] = {
+    {
+        .names = &fdt_generic_gpio_name_set_gpio,
+        .gpios = (FDTGenericGPIOConnection[]) {
+            { .name = GPIO_NAME_LAST_TIMEOUT,     .fdt_index = 0,     .range = 1 },
+            { }
+        }
+    },
+    { }
 };
 
 static void hpsc_wdt_realize(DeviceState *dev, Error **errp)
@@ -654,6 +675,9 @@ static void hpsc_wdt_init(Object *obj)
 
     for (stage = 0; stage < NUM_STAGES; ++stage)
         sysbus_init_irq(SYS_BUS_DEVICE(s), &s->irqs[stage]);
+
+    qdev_init_gpio_out_named(DEVICE(obj), &s->last_timeout_gpio,
+                            GPIO_NAME_LAST_TIMEOUT, 1);
 }
 
 static const VMStateDescription vmstate_hpsc_wdt = {
@@ -670,10 +694,13 @@ static const VMStateDescription vmstate_hpsc_wdt = {
 static void hpsc_wdt_class_init(ObjectClass *klass, void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
+    FDTGenericGPIOClass *fggc = FDT_GENERIC_GPIO_CLASS(klass);
 
     dc->reset = hpsc_wdt_reset;
     dc->realize = hpsc_wdt_realize;
     dc->vmsd = &vmstate_hpsc_wdt;
+
+    fggc->controller_gpios = wdt_gpios;
 }
 
 static const TypeInfo hpsc_wdt_info = {
@@ -682,6 +709,10 @@ static const TypeInfo hpsc_wdt_info = {
     .instance_size = sizeof(HPSCWDTimer),
     .class_init    = hpsc_wdt_class_init,
     .instance_init = hpsc_wdt_init,
+    .interfaces    = (InterfaceInfo[]) {
+        { TYPE_FDT_GENERIC_GPIO },
+        { }
+    },
 };
 
 static void hpsc_wdt_register_types(void)
