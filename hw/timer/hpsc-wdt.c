@@ -628,6 +628,8 @@ static void hpsc_wdt_realize(DeviceState *dev, Error **errp)
             .prefix = prefix,
             .opaque = s,
         };
+        dep_register_init(r);
+        qdev_pass_all_gpios(DEVICE(r), dev);
     }
 
     for (i = 0; i < NUM_STAGES; ++i) {
