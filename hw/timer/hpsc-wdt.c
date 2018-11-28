@@ -241,31 +241,6 @@ static void timer_update_freq(HPSCWDTimer *s)
         ptimer_set_freq(s->ptimers[stage], freq);
 }
 
-static void timer_tick(void *opaque)
-{
-    stage_ctx_t *ctx = opaque;
-    HPSCWDTimer *s = ctx->timer;
-    unsigned stage = ctx->stage;
-
-    qemu_log("%s: stage %u: tick\n",
-            object_get_canonical_path(OBJECT(s)), stage);
-
-    // Probably not possible, if the tick callback is serialized with the other
-    // calls that block the target. But, just in case, don't set the irq.
-    if (!s->enabled)
-        return;
-
-    update_irq(s, stage, 1);
-
-    if (stage < NUM_STAGES - 1) {
-        unsigned next_stage = stage + 1;
-        ptimer_set_count(s->ptimers[next_stage], s->terminals[next_stage]);
-        ptimer_run(s->ptimers[next_stage], PTIMER_MODE_ONE_SHOT);
-    } else { // last stage
-        set_enabled_state(s, false);
-    }
-    // ptimer already disabled because it is one shot
-}
 
 static void wdt_enable(HPSCWDTimer *s)
 {
@@ -598,6 +573,32 @@ static void hpsc_wdt_access(MemoryTransaction *tr)
     } else {
         tr->data.u64 = hpsc_wdt_read(opaque, addr, size);
     }
+}
+
+static void timer_tick(void *opaque)
+{
+    stage_ctx_t *ctx = opaque;
+    HPSCWDTimer *s = ctx->timer;
+    unsigned stage = ctx->stage;
+
+    qemu_log("%s: stage %u: tick\n",
+            object_get_canonical_path(OBJECT(s)), stage);
+
+    // Probably not possible, if the tick callback is serialized with the other
+    // calls that block the target. But, just in case, don't set the irq.
+    if (!s->enabled)
+        return;
+
+    update_irq(s, stage, 1);
+
+    if (stage < NUM_STAGES - 1) {
+        unsigned next_stage = stage + 1;
+        ptimer_set_count(s->ptimers[next_stage], s->terminals[next_stage]);
+        ptimer_run(s->ptimers[next_stage], PTIMER_MODE_ONE_SHOT);
+    } else { // last stage
+        set_enabled_state(s, false);
+    }
+    // ptimer already disabled because it is one shot
 }
 
 static const MemoryRegionOps hpsc_wdt_ops = {
