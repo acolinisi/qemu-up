@@ -459,18 +459,18 @@ static void post_write_status(DepRegisterInfo *reg, uint64_t val64)
 // Terminal values reset to max by spec
 static DepRegisterAccessInfo hpsc_wdt_regs_info[] = {
 
-#define REG_INFO_STAGE_INNER(reg, stage) \
+#define REG_INFO_STAGE_INNER(reg, stage, defval) \
     {   .name = "REG_ST" #stage "_" #reg, \
         .decode.addr = CONCAT5(A_, REG_ST, stage, _, reg), \
-        .reset = 0xffffffff, \
+        .reset = defval, \
     }
-#define REG_INFO_STAGE(reg, stage) REG_INFO_STAGE_INNER(reg, stage)
+#define REG_INFO_STAGE(reg, stage, defval) REG_INFO_STAGE_INNER(reg, stage, defval)
 
 #define REGS_INFO_STAGE(stage) \
-    REG_INFO_STAGE(TERMINAL_LO, stage), \
-    REG_INFO_STAGE(TERMINAL_HI, stage), \
-    REG_INFO_STAGE(COUNT_LO,    stage), \
-    REG_INFO_STAGE(COUNT_HI,    stage), \
+    REG_INFO_STAGE(TERMINAL_LO, stage, 0xffffffff), \
+    REG_INFO_STAGE(TERMINAL_HI, stage, 0xffffffff), \
+    REG_INFO_STAGE(COUNT_LO,    stage, 0x0), \
+    REG_INFO_STAGE(COUNT_HI,    stage, 0x0), \
 
 #if NUM_STAGES >= 1
 REGS_INFO_STAGE(0)
