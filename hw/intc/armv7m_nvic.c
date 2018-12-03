@@ -2318,9 +2318,8 @@ static int arm_nvic_fdt_get_irq(FDTGenericIntc *obj, qemu_irq *irqs,
                                       uint32_t *cells, int ncells, int max,
                                       Error **errp)
 {
-    /* if interrupt-cells = 1, use cells[0],
-          interrupt-cells = 3, use cells[1] */
-    (*irqs) = qdev_get_gpio_in(DEVICE(obj), cells[1]);
+    assert(ncells == 1);
+    (*irqs) = qdev_get_gpio_in(DEVICE(obj), cells[0]);
     return 1;
 }
 
