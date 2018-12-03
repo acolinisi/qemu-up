@@ -564,17 +564,21 @@ static void hpsc_wdt_write(void *opaque, hwaddr addr, uint64_t value,
 
 static void hpsc_wdt_access(MemoryTransaction *tr)
 {
+#if 0
     MemTxAttrs attr = tr->attr;
+#endif
     void *opaque = tr->opaque;
     hwaddr addr = tr->addr;
     unsigned size = tr->size;
     uint64_t value = tr->data.u64;;
     bool is_write = tr->rw;
 
+#if 0 // TODO
     if (!attr.secure) {
         qemu_log_mask(LOG_GUEST_ERROR, "unsecure access to timer denied\n");
         return;
     }
+#endif
 
     if (is_write) {
         hpsc_wdt_write(opaque, addr, value, size);
