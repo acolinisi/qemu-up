@@ -434,7 +434,10 @@ static void post_write_config(DepRegisterInfo *reg, uint64_t val64)
             R_REG_CONFIG_EN_SHIFT, R_REG_CONFIG_EN_LENGTH);
     timer_update_freq(s); // TODO: is this update indeed a NOP if value unchanged?
 
-    assert(enabled); // since pre_write_config prevents disabling
+    // Either currently disabled, or we're asking to enable, not to disable.
+    // Asking to disable should not reach hear since overwridden by pre_write_config.
+    assert(!s->enabled || enabled);
+
     if (enabled != s->enabled)
         wdt_enable(s);
 }
