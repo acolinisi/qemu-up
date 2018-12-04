@@ -106,13 +106,15 @@ static MemTxResult hpsc_mbox_read(void *opaque, hwaddr offset, uint64_t *r, unsi
         for (int_idx = 0; int_idx < HPSC_MBOX_INTS; ++int_idx)
             ie |= (si->int_enable >> (2 * int_idx)) & HPSC_MBOX_EVENTS_MASK;
         *r = si->event_status & ie;
-        qemu_log_mask(LOG_GUEST_ERROR, "%s: %p: cause: event_status %x cause %lx\n", __func__, si, si->event_status, *r);
+        qemu_log_mask(LOG_GUEST_ERROR, "%s: instance %u %p: cause: event_status %x cause %lx\n",
+                      __func__, instance, si, si->event_status, *r);
         break;
     default:
         if (offset >= REG_DATA) {
             unsigned reg_idx = (offset - REG_DATA) / 4; // each reg is 32 bits = 4 bytes
             *r = si->data[reg_idx];
-            qemu_log_mask(LOG_GUEST_ERROR, "%s: read data[%lx|%u] -> %x\n", __func__, offset, reg_idx, si->data[reg_idx]);
+            qemu_log_mask(LOG_GUEST_ERROR, "%s: instance %u read data[%lx|%u] -> %x\n",
+                          __func__, instance, offset, reg_idx, si->data[reg_idx]);
         } else {
             qemu_log_mask(LOG_GUEST_ERROR, "%s: write to unrecognized register\n", __func__);
         }
@@ -162,21 +164,21 @@ static MemTxResult hpsc_mbox_write(void *opaque, hwaddr offset,
         if (!check_owner_or_dest(si, attrs, "EVENT_ENABLE"))
             return MEMTX_ERROR;
         si->int_enable = value;
-        qemu_log_mask(LOG_GUEST_ERROR, "%s: int_enable %x\n", __func__, si->int_enable);
+        qemu_log_mask(LOG_GUEST_ERROR, "%s: instance %u int_enable %x\n", __func__, instance, si->int_enable);
         update_irq(s, instance);
         break;
     case REG_EVENT_CLEAR:
         if (!check_owner_or_dest(si, attrs, "EVENT_CLEAR"))
             return MEMTX_ERROR;
         si->event_status &= ~value;
-        qemu_log_mask(LOG_GUEST_ERROR, "%s: event_status %x\n", __func__, si->event_status);
+        qemu_log_mask(LOG_GUEST_ERROR, "%s: instance %u, event_status %x\n", __func__, instance, si->event_status);
         update_irq(s, instance);
         break;
     case REG_EVENT_SET:
         if (!check_owner_or_dest(si, attrs, "EVENT_SET"))
             return MEMTX_ERROR;
         si->event_status |= value;
-        qemu_log_mask(LOG_GUEST_ERROR, "%s: event_status %x\n", __func__, si->event_status);
+        qemu_log_mask(LOG_GUEST_ERROR, "%s: instance %u event_status %x\n", __func__, instance, si->event_status);
         update_irq(s, instance);
         break;
     default:
@@ -186,7 +188,8 @@ static MemTxResult hpsc_mbox_write(void *opaque, hwaddr offset,
             reg_idx = (offset - REG_DATA) / 4; // each register is 32 bits = 4 bytes
             assert(reg_idx < HPSC_MBOX_DATA_REGS); // otherwise we got here through wrong calc, not bad user code
             si->data[reg_idx] = (uint32_t)value;
-            qemu_log_mask(LOG_GUEST_ERROR, "%s: wrote data[%lx|%u] <- %x\n", __func__, offset, reg_idx, (uint32_t)value);
+            qemu_log_mask(LOG_GUEST_ERROR, "%s: instance %u wrote data[%lx|%u] <- %x\n",
+                          __func__, instance, offset, reg_idx, (uint32_t)value);
         } else {
             switch (offset) {
                 case REG_EVENT_CAUSE:
