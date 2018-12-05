@@ -87,6 +87,11 @@ DEP_REG32(REG_CMD_FIRE, GLOBAL_FRAME + 0x0c)
 #define R_MAX (R_REG_CMD_FIRE + 1)
 
 #define CLK_FREQ_HZ 3906250 // TODO: take from DT, either via a ref to a clk node, or a value
+
+// Note: with concept B, choose a width such that, SW can add counts from stages without overflow
+//       with concept A, this can be <=64, since SW never needs to add stages together
+#define COUNTER_WIDTH (64 - (NUM_STAGES - 1))
+
 #define PTIMER_MDOE_ONE_SHOT 1
 
 typedef enum {
@@ -466,6 +471,7 @@ static DepRegisterAccessInfo hpsc_wdt_regs_info[] = {
     {   .name = "REG_ST" #stage "_" #reg, \
         .decode.addr = CONCAT5(A_, REG_ST, stage, _, reg), \
         .reset = defval, \
+        .rsvd = (~0ULL << COUNTER_WIDTH), \
     }
 #define REG_INFO_STAGE(reg, stage, defval) REG_INFO_STAGE_INNER(reg, stage, defval)
 
