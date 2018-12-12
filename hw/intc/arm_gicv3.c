@@ -388,6 +388,13 @@ static const FDTGenericGPIOSet arm_gicv3_client_gpios[] = {
         .names = &fdt_generic_gpio_name_set_interrupts,
         .gpios = output_gpios,
     },
+    {
+      .names = &fdt_generic_gpio_name_set_gpio,
+      .gpios = (FDTGenericGPIOConnection[]) {
+            { .name = "resetn",  .range = 1, .fdt_index = 0 },
+        { },
+      },
+    },
     { },
 };
 

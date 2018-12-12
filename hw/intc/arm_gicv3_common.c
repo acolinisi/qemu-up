@@ -31,6 +31,7 @@
 
 #include "hw/fdt_generic_util.h"
 
+static void arm_gicv3_common_reset_gpio(void *obj, int irq, int level);
 
 static void gicv3_gicd_no_migration_shift_bug_post_load(GICv3State *cs)
 {
@@ -292,6 +293,8 @@ void gicv3_init_irqs_and_mmio(GICv3State *s, qemu_irq_handler handler,
         qdev_init_gpio_out_named(DEVICE(s), &s->cpu[i].parent_vfiq, "vfiq", 1);
     }
 
+    qdev_init_gpio_in_named(DEVICE(s), arm_gicv3_common_reset_gpio, "resetn", 1);
+
     memory_region_init_io(&s->iomem_dist, OBJECT(s), ops, s,
                           "gicv3_dist", 0x10000);
     sysbus_init_mmio(sbd, &s->iomem_dist);
@@ -539,6 +542,14 @@ static void arm_gic_common_linux_init(ARMLinuxBootIf *obj,
          */
         s->irq_reset_nonsecure = true;
     }
+}
+
+static void arm_gicv3_common_reset_gpio(void *obj, int irq, int level)
+{
+    GICv3State *s = ARM_GICV3_COMMON(obj);
+    if (s->reset && !level)
+        arm_gicv3_common_reset((DeviceState *)s);
+    s->reset = level;
 }
 
 static Property arm_gicv3_common_properties[] = {
