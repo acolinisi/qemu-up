@@ -360,6 +360,37 @@ static const MemoryRegionOps gic_ops[] = {
     }
 };
 
+static void arm_gicv3_populate_output_gpio_set(FDTGenericGPIOConnection *conn,
+                                               unsigned num_cpus)
+{
+    assert(conn);
+    unsigned fdt_index = conn->fdt_index; // let the entry specify staring index
+    while (conn->name) { // use name as validity marker
+        conn->fdt_index = fdt_index;
+        conn->range = num_cpus;
+        fdt_index += num_cpus;
+        conn++;
+    }
+}
+
+static FDTGenericGPIOConnection output_gpios[] = {
+    /* range and fdt_index populate on realize, because depends on num_cpu */
+    { .name = "irq",     .range = 0, .fdt_index = 0 /* will start a this index */ },
+    { .name = "fiq",     .range = 0, .fdt_index = 0 },
+    { .name = "virq",    .range = 0, .fdt_index = 0 },
+    { .name = "vfiq",    .range = 0, .fdt_index = 0 },
+    { .name = "maint",   .range = 0, .fdt_index = 0 },
+    { },
+};
+
+static const FDTGenericGPIOSet arm_gicv3_client_gpios[] = {
+    {
+        .names = &fdt_generic_gpio_name_set_interrupts,
+        .gpios = output_gpios,
+    },
+    { },
+};
+
 static void arm_gic_realize(DeviceState *dev, Error **errp)
 {
     /* Device instance realize function for the GIC sysbus device */
@@ -379,6 +410,7 @@ static void arm_gic_realize(DeviceState *dev, Error **errp)
         return;
     }
 
+    arm_gicv3_populate_output_gpio_set(output_gpios, s->num_cpu);
     gicv3_init_irqs_and_mmio(s, gicv3_set_irq, gic_ops, &local_err);
     if (local_err) {
         error_propagate(errp, local_err);
