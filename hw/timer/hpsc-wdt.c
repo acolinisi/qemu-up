@@ -476,8 +476,8 @@ static DepRegisterAccessInfo hpsc_wdt_regs_info[] = {
 #define REG_INFO_STAGE(reg, stage, defval) REG_INFO_STAGE_INNER(reg, stage, defval)
 
 #define REGS_INFO_STAGE(stage) \
-    REG_INFO_STAGE(TERMINAL_LO, stage, 0xffffffff), \
-    REG_INFO_STAGE(TERMINAL_HI, stage, 0xffffffff), \
+    REG_INFO_STAGE(TERMINAL_LO, stage, (~0ULL >> (64 - COUNTER_WIDTH)) & 0xffffffff), \
+    REG_INFO_STAGE(TERMINAL_HI, stage, (~0ULL >> (64 - COUNTER_WIDTH)) >> 32), \
     REG_INFO_STAGE(COUNT_LO,    stage, 0x0), \
     REG_INFO_STAGE(COUNT_HI,    stage, 0x0), \
 
