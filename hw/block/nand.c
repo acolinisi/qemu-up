@@ -66,7 +66,8 @@ struct NANDFlashState {
 
     uint8_t manf_id, chip_id;
     uint8_t buswidth; /* in BYTES */
-    int size, pages;
+    uint64_t size;
+    int  pages;
     int page_shift, oob_shift, erase_shift, addr_shift;
     uint8_t *storage;
     BlockBackend *blk;
@@ -91,11 +92,11 @@ struct NANDFlashState {
     uint64_t addr;
     int addrlen;
     int status;
-    int offset;
+    uint64_t offset;
 
     void (*blk_write)(NANDFlashState *s);
     void (*blk_erase)(NANDFlashState *s);
-    void (*blk_load)(NANDFlashState *s, uint64_t addr, int offset);
+    void (*blk_load)(NANDFlashState *s, uint64_t addr, uint64_t offset);
 
     uint32_t ioaddr_vmstate;
 };
@@ -153,7 +154,7 @@ static void mem_and(uint8_t *dest, const uint8_t *src, size_t n)
 
 /* Information based on Linux drivers/mtd/nand/nand_ids.c */
 static const struct {
-    int size;
+    uint64_t size;
     int width;
     int page_shift;
     int erase_shift;
@@ -359,6 +360,36 @@ static const struct {
     [0xd5] = { 2048,	8,	0, 0, LP_OPTIONS },
     [0xb5] = { 2048,	16,	0, 0, LP_OPTIONS16 },
     [0xc5] = { 2048,	16,	0, 0, LP_OPTIONS16 },
+
+    /* 32 Gigabit : from Linux */
+    [0xa7] = { 4096,	8,	0, 0, LP_OPTIONS },
+    [0xd7] = { 4096,	8,	0, 0, LP_OPTIONS },
+    [0xb7] = { 4096,	16,	0, 0, LP_OPTIONS16 },
+    [0xc7] = { 4096,	16,	0, 0, LP_OPTIONS16 },
+
+    /* 64 Gigabit : from Linux */
+    [0xae] = { 8192,	8,	0, 0, LP_OPTIONS },
+    [0xde] = { 8192,	8,	0, 0, LP_OPTIONS },
+    [0xbe] = { 8192,	16,	0, 0, LP_OPTIONS16 },
+    [0xce] = { 8192,	16,	0, 0, LP_OPTIONS16 },
+
+    /* 128 Gigabit : from Linux */
+    [0x1a] = { 16384,	8,	0, 0, LP_OPTIONS },
+    [0x3a] = { 16384,	8,	0, 0, LP_OPTIONS },
+    [0x2a] = { 16384,	16,	0, 0, LP_OPTIONS16 },
+    [0x4a] = { 16384,	16,	0, 0, LP_OPTIONS16 },
+
+    /* 256 Gigabit : from Linux */
+    [0x1c] = { 32768,	8,	0, 0, LP_OPTIONS },
+    [0x3c] = { 32768,	8,	0, 0, LP_OPTIONS },
+    [0x2c] = { 32768,	16,	0, 0, LP_OPTIONS16 },
+    [0x4c] = { 32768,	16,	0, 0, LP_OPTIONS16 },
+
+    /* 512 Gigabit : from Linux */
+    [0x1e] = { 65536,	8,	0, 0, LP_OPTIONS },
+    [0x3e] = { 65536,	8,	0, 0, LP_OPTIONS },
+    [0x2e] = { 65536,	16,	0, 0, LP_OPTIONS16 },
+    [0x4e] = { 65536,	16,	0, 0, LP_OPTIONS16 },
 };
 
 static void nand_reset(DeviceState *dev)
@@ -391,7 +422,7 @@ static inline void nand_pushio_byte(NANDFlashState *s, uint8_t value, bool reg)
 static void nand_command(NANDFlashState *s)
 {
     int i, j;
-    unsigned int offset;
+    uint64_t offset;
     switch (s->cmd) {
     case NAND_CMD_READ0:
         s->iolen = 0;
@@ -537,7 +568,7 @@ static const VMStateDescription vmstate_nand = {
         VMSTATE_UINT64(addr, NANDFlashState),
         VMSTATE_INT32(addrlen, NANDFlashState),
         VMSTATE_INT32(status, NANDFlashState),
-        VMSTATE_INT32(offset, NANDFlashState),
+        VMSTATE_UINT64(offset, NANDFlashState),
         /* XXX: do we want to save s->storage too? */
         VMSTATE_END_OF_LIST()
     }
@@ -836,8 +867,7 @@ static uint32_t nand_readreg(NANDFlashState *s)
 
 uint32_t nand_getio(DeviceState *dev)
 {
-    int offset;
-    uint64_t addr;
+    uint64_t offset, addr;
     uint32_t x = 0;
     NANDFlashState *s = NAND(dev);
 
@@ -1044,7 +1074,7 @@ static void glue(nand_blk_erase_, PAGE_SIZE)(NANDFlashState *s)
 }
 
 static void glue(nand_blk_load_, PAGE_SIZE)(NANDFlashState *s,
-                uint64_t addr, int offset)
+                uint64_t addr, uint64_t offset)
 {
     if (PAGE(addr) >= s->pages) {
         return;
