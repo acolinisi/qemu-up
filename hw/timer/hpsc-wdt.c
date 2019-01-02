@@ -88,9 +88,13 @@ DEP_REG32(REG_CMD_FIRE, GLOBAL_FRAME + 0x0c)
 
 #define CLK_FREQ_HZ 3906250 // TODO: take from DT, either via a ref to a clk node, or a value
 
-// Note: with concept B, choose a width such that, SW can add counts from stages without overflow
+// Note: with concept B, choose a width such that, SW can add counts from stages without overflow,
+//       i.e. at most (64 - (NUM_STAGES - 1))
 //       with concept A, this can be <=64, since SW never needs to add stages together
-#define COUNTER_WIDTH (64 - (NUM_STAGES - 1))
+// Note: there is an additional limitation from the Qemu timer.h/ptimer.h backend: period[ns] * count
+//       must not overflow a int64_t. Period is at most 1/CLK_FREQ_HZ * 10^9 ns (= 256, i.e. 8 bits),
+//       so count must be 8 bits smaller (and another -1 bit due to int64_t instead of uint64_t).
+#define COUNTER_WIDTH (64 - (NUM_STAGES - 1) - 8 - 1)
 
 #define PTIMER_MDOE_ONE_SHOT 1
 
