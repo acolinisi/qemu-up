@@ -534,9 +534,9 @@ static void hpsc_wdt_reset(DeviceState *dev)
 
     for (stage = 0; stage < NUM_STAGES; ++stage) {
         s->terminals[stage] = get_staging_terminal(s, stage);
-        qemu_log("%s: stage %u: reset: terminal <- %lx\n",
+        qemu_log("%s: stage %u: reset: terminal <- %lx (width %u)\n",
                 object_get_canonical_path(OBJECT(s)),
-                stage, s->terminals[stage]);
+                stage, s->terminals[stage], COUNTER_WIDTH);
         timer_reload(s, stage);
         update_irq(s, stage, 0);
     }
