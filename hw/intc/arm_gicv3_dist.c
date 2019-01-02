@@ -379,8 +379,13 @@ static MemTxResult gicd_readl(GICv3State *s, hwaddr offset,
          */
         int itlinesnumber = ((s->num_irq - GIC_INTERNAL) / 32) - 1;
 
-        *data = (1 << 25) | (1 << 24) | (s->security_extn << 10) |
-            (0xf << 19) | itlinesnumber;
+        if (s->gicd_typer) {
+            if ((s->gicd_typer & 0x1f) < itlinesnumber) {
+                *data = (s->gicd_typer & ~(0x1f)) | itlinesnumber;
+            } else {
+                *data = s->gicd_typer;
+            }
+        }
         return MEMTX_OK;
     }
     case GICD_IIDR:

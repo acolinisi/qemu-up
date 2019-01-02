@@ -494,6 +494,7 @@ static Property arm_gicv3_common_properties[] = {
     DEFINE_PROP_BOOL("has-security-extensions", GICv3State, security_extn, 0),
     DEFINE_PROP_ARRAY("redist-region-count", GICv3State, nb_redist_regions,
                       redist_region_count, qdev_prop_uint32, uint32_t),
+    DEFINE_PROP_UINT32("gicd-typer", GICv3State, gicd_typer, 0),
     DEFINE_PROP_END_OF_LIST(),
 };
 

@@ -222,6 +222,7 @@ struct GICv3State {
     bool security_extn;
     bool irq_reset_nonsecure;
     bool gicd_no_migration_shift_bug;
+    uint32_t gicd_typer; /* Interrupt Controller Type Register value */
 
     int dev_fd; /* kvm device fd if backed by kvm vgic support */
     Error *migration_blocker;

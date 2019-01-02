@@ -2608,6 +2608,11 @@ void gicv3_init_cpuif(GICv3State *s)
         ARMCPU *cpu = ARM_CPU(qemu_get_cpu(i));
         GICv3CPUState *cs = &s->cpu[i];
 
+        /* fixup for GICR_TYPER of R52 */
+        if (arm_feature(&cpu->env, ARM_FEATURE_V8R)) {
+            s->cpu[i].gicr_typer &= ~(1 << 24);
+        }
+
         /* Note that we can't just use the GICv3CPUState as an opaque pointer
          * in define_arm_cp_regs_with_opaque(), because when we're called back
          * it might be with code translated by CPU 0 but run by CPU 1, in
