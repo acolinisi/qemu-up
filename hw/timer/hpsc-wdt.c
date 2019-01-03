@@ -10,10 +10,19 @@
 #include "hw/fdt_generic_util.h"
 
 #ifndef HPSC_WDT_TIMER_ERR_DEBUG
-#define HPSC_WDT_TIMER_ERR_DEBUG 1
+#define HPSC_WDT_TIMER_ERR_DEBUG 0
 #endif
 
 #define TYPE_HPSC_WDT_TIMER "hpsc,hpsc-wdt"
+
+#define DB_PRINT_L(lvl, fmt, args...) do {\
+    if (HPSC_WDT_TIMER_ERR_DEBUG >= lvl) {\
+        qemu_log(TYPE_HPSC_WDT_TIMER ": %s:" fmt, __func__, ## args);\
+    } \
+} while (0);
+
+#define DB_PRINT(fmt, args...) DB_PRINT_L(1, fmt, ## args)
+
 #define GPIO_NAME_LAST_TIMEOUT "LAST_TIMEOUT"
 
 #define HPSC_WDT_TIMER(obj) \
@@ -197,7 +206,7 @@ static void set_enabled_state(HPSCWDTimer *s, bool enabled)
 static void timer_reload(HPSCWDTimer *s, unsigned stage)
 {
     unsigned st;
-    qemu_log("%s: stage %u: reload count <- %lx\n",
+    DB_PRINT("%s: stage %u: reload count <- %lx\n",
             object_get_canonical_path(OBJECT(s)),
             stage, s->terminals[stage]);
 
@@ -235,7 +244,7 @@ static void timer_adjust(HPSCWDTimer *s, unsigned stage, uint32_t terminal)
 
     uint64_t elapsed = s->terminals[stage] - ptimer_get_count(pt);
     uint64_t remaining = terminal >= elapsed ? terminal - elapsed : 0;
-    qemu_log("%s: stage %u: adjust count <- %lx\n",
+    DB_PRINT("%s: stage %u: adjust count <- %lx\n",
             object_get_canonical_path(OBJECT(s)), stage, remaining);
     ptimer_set_count(pt, remaining);
 
@@ -251,7 +260,7 @@ static void timer_update_freq(HPSCWDTimer *s)
             R_REG_CONFIG_TICKDIV_SHIFT, R_REG_CONFIG_TICKDIV_LENGTH) + 1;
     uint32_t freq = CLK_FREQ_HZ / tickdiv;
 
-    qemu_log("%s: update freq <- %u\n",
+    DB_PRINT("%s: update freq <- %u\n",
             object_get_canonical_path(OBJECT(s)), freq);
 
     for (stage = 0; stage < NUM_STAGES; ++stage)
@@ -283,18 +292,18 @@ static void execute_stage_cmd(HPSCWDTimer *s, stage_cmd_t cmd, unsigned stage)
                 count = s->terminals[stage] - ptimer_get_count(s->ptimers[stage]);
                 s->regs[reg_offset + R_REG_ST0_COUNT_LO] = (uint32_t)(count & 0xffffffff);
                 s->regs[reg_offset + R_REG_ST0_COUNT_HI] = (uint32_t)(count >> 32);
-                qemu_log("%s: stage cmd: stage %u: capture: count <- %lx\n",
+                DB_PRINT("%s: stage cmd: stage %u: capture: count <- %lx\n",
                          object_get_canonical_path(OBJECT(s)), stage, count);
                 break;
         case SCMD_LOAD:
                 staging_terminal = get_staging_terminal(s, stage);
                 timer_adjust(s, stage,  staging_terminal);
                 s->terminals[stage] = staging_terminal;
-                qemu_log("%s: stage cmd: stage %u: load: terminal <- %lx\n",
+                DB_PRINT("%s: stage cmd: stage %u: load: terminal <- %lx\n",
                          object_get_canonical_path(OBJECT(s)), stage, staging_terminal);
                 break;
         case SCMD_CLEAR:
-                qemu_log("%s: stage cmd: stage %u: clear\n",
+                DB_PRINT("%s: stage cmd: stage %u: clear\n",
                          object_get_canonical_path(OBJECT(s)), stage);
                 timer_reload(s, stage);
                 update_irq(s, stage, 0);
@@ -346,12 +355,12 @@ static void post_write_arm_code(DepRegisterInfo *reg, uint64_t val64)
 #undef STAGE_CMD_CASE
 
         case CMD_DISABLE_ARM:
-            qemu_log("%s: cmd armed: %" PRIx64 "\n",
+            DB_PRINT("%s: cmd armed: %" PRIx64 "\n",
                      object_get_canonical_path(OBJECT(s)), val64);
             s->arm_code = val64;
             break;
         default:
-            qemu_log_mask(LOG_GUEST_ERROR,
+            DB_PRINT_mask(LOG_GUEST_ERROR,
                     "%s: unrecognized cmd arm code: %" PRIx64 "\n",
                      object_get_canonical_path(OBJECT(s)), val64);
     }
@@ -365,7 +374,7 @@ static void post_write_cmd_fire(DepRegisterInfo *reg, uint64_t val64)
     cmd_t cmd = CMD_INVALID;
     stage_cmd_t scmd = SCMD_INVALID;
     uint32_t arm_code = s->regs[R_REG_CMD_ARM];
-    qemu_log("%s: arm code: %x\n",
+    DB_PRINT("%s: arm code: %x\n",
              object_get_canonical_path(OBJECT(s)), arm_code);
     switch (val64) {
         case CMD_DISABLE_FIRE:
@@ -407,11 +416,11 @@ static void post_write_cmd_fire(DepRegisterInfo *reg, uint64_t val64)
     }
 
     if (cmd != CMD_INVALID) {
-            qemu_log("%s: cmd fired: %u\n",
+            DB_PRINT("%s: cmd fired: %u\n",
                      object_get_canonical_path(OBJECT(s)), cmd);
             execute_cmd(s, cmd);
     } else if (scmd != SCMD_INVALID) {
-            qemu_log("%s: stage cmd fired: scmd %u stage %u\n",
+            DB_PRINT("%s: stage cmd fired: scmd %u stage %u\n",
                      object_get_canonical_path(OBJECT(s)), scmd, stage);
             execute_stage_cmd(s, scmd, stage);
     } else {
@@ -538,7 +547,7 @@ static void hpsc_wdt_reset(DeviceState *dev)
 
     for (stage = 0; stage < NUM_STAGES; ++stage) {
         s->terminals[stage] = get_staging_terminal(s, stage);
-        qemu_log("%s: stage %u: reset: terminal <- %lx (width %u)\n",
+        DB_PRINT("%s: stage %u: reset: terminal <- %lx (width %u)\n",
                 object_get_canonical_path(OBJECT(s)),
                 stage, s->terminals[stage], COUNTER_WIDTH);
         timer_reload(s, stage);
@@ -606,7 +615,7 @@ static void timer_tick(void *opaque)
     HPSCWDTimer *s = ctx->timer;
     unsigned stage = ctx->stage;
 
-    qemu_log("%s: stage %u: tick\n",
+    DB_PRINT("%s: stage %u: tick\n",
             object_get_canonical_path(OBJECT(s)), stage);
 
     // Probably not possible, if the tick callback is serialized with the other
