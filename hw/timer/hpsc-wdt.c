@@ -105,8 +105,6 @@ DEP_REG32(REG_CMD_FIRE, GLOBAL_FRAME + 0x0c)
 //       so count must be 8 bits smaller (and another -1 bit due to int64_t instead of uint64_t).
 #define COUNTER_WIDTH (64 - (NUM_STAGES - 1) - 8 - 1)
 
-#define PTIMER_MDOE_ONE_SHOT 1
-
 typedef enum {
     SCMD_INVALID = 0,
     SCMD_CAPTURE,
@@ -166,7 +164,6 @@ typedef struct HPSCWDTimer {
     qemu_irq last_timeout_gpio;
 
     bool enabled;
-    uint64_t tick_offset;
 
     uint32_t regs[R_MAX];
     DepRegisterInfo regs_info[R_MAX];
@@ -609,7 +606,7 @@ static void hpsc_wdt_access(MemoryTransaction *tr)
     }
 }
 
-static void timer_tick(void *opaque)
+static void timer_rollover(void *opaque)
 {
     stage_ctx_t *ctx = opaque;
     HPSCWDTimer *s = ctx->timer;
@@ -684,7 +681,7 @@ static void hpsc_wdt_realize(DeviceState *dev, Error **errp)
         stage_ctx_t *ctx = &s->stage_ctxs[i];
         ctx->timer = s;
         ctx->stage = i;
-        s->bhs[i] = qemu_bh_new(timer_tick, ctx);
+        s->bhs[i] = qemu_bh_new(timer_rollover, ctx);
         s->ptimers[i] = ptimer_init(s->bhs[i], PTIMER_POLICY_DEFAULT);
     }
 }
