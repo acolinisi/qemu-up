@@ -201,6 +201,27 @@ static inline unsigned long find_first_zero_bit(const unsigned long *addr,
     return find_next_zero_bit(addr, size, 0);
 }
 
+/* log2_of_pow2 - log base 2 of a value that is a power of 2
+ * @v: The value to take the log of
+ *
+ * Assumes @v is a power of 2 (i.e. only one bit in @v is set), otherwise
+ * an assert fails.
+ *
+ * Returns the index of the one and only bit set in @v.  Similar to
+ * find_last_bit but invariant w.r.t.  endianness.
+ */
+static inline unsigned log2_of_pow2(unsigned long v)
+{
+    assert(v);
+    int b = 1;
+    while ((v & 0x1) == 0x0) {
+        v >>= 1;
+        b++;
+    }
+    assert(v == 0x1); // power of 2
+    return b;
+}
+
 /**
  * rol8 - rotate an 8-bit value left
  * @word: value to rotate
