@@ -95,16 +95,6 @@ DEP_REG32(REG_CMD_FIRE, GLOBAL_FRAME + 0x0c)
 
 #define R_MAX (R_REG_CMD_FIRE + 1)
 
-#define CLK_FREQ_HZ 3906250 // TODO: take from DT, either via a ref to a clk node, or a value
-
-// Note: with concept B, choose a width such that, SW can add counts from stages without overflow,
-//       i.e. at most (64 - (NUM_STAGES - 1))
-//       with concept A, this can be <=64, since SW never needs to add stages together
-// Note: there is an additional limitation from the Qemu timer.h/ptimer.h backend: period[ns] * count
-//       must not overflow a int64_t. Period is at most 1/CLK_FREQ_HZ * 10^9 ns (= 256, i.e. 8 bits),
-//       so count must be 8 bits smaller (and another -1 bit due to int64_t instead of uint64_t).
-#define COUNTER_WIDTH (64 - (NUM_STAGES - 1) - 8 - 1)
-
 typedef enum {
     SCMD_INVALID = 0,
     SCMD_CAPTURE,
@@ -152,6 +142,10 @@ typedef struct {
 typedef struct HPSCWDTimer {
     SysBusDevice parent_obj;
     MemoryRegion iomem;
+
+    // Props from DT
+    uint32_t clk_freq_hz;
+    uint32_t max_tickdiv;
 
     QEMUBH *bhs[NUM_STAGES];
     ptimer_state *ptimers[NUM_STAGES];
@@ -255,7 +249,7 @@ static void timer_update_freq(HPSCWDTimer *s)
     // TODO: +1 in field semantics?
     unsigned tickdiv = extract32(s->regs[R_REG_CONFIG],
             R_REG_CONFIG_TICKDIV_SHIFT, R_REG_CONFIG_TICKDIV_LENGTH) + 1;
-    uint32_t freq = CLK_FREQ_HZ / tickdiv;
+    uint32_t freq = s->clk_freq_hz / tickdiv;
 
     DB_PRINT("%s: update freq <- %u\n",
             object_get_canonical_path(OBJECT(s)), freq);
@@ -477,19 +471,21 @@ static void post_write_status(DepRegisterInfo *reg, uint64_t val64)
 // Terminal values reset to max by spec
 static DepRegisterAccessInfo hpsc_wdt_regs_info[] = {
 
-#define REG_INFO_STAGE_INNER(reg, stage, defval) \
+// NOTE: hpsc_wdt_realize assumes that stage registers come first
+//       and that the terminal register is first among them
+
+// Note: .reset and .rsvd are set at runtime depending on counter width
+#define REG_INFO_STAGE_INNER(reg, stage) \
     {   .name = "REG_ST" #stage "_" #reg, \
         .decode.addr = CONCAT5(A_, REG_ST, stage, _, reg), \
-        .reset = defval, \
-        .rsvd = (~0ULL << COUNTER_WIDTH), \
     }
-#define REG_INFO_STAGE(reg, stage, defval) REG_INFO_STAGE_INNER(reg, stage, defval)
+#define REG_INFO_STAGE(reg, stage) REG_INFO_STAGE_INNER(reg, stage)
 
 #define REGS_INFO_STAGE(stage) \
-    REG_INFO_STAGE(TERMINAL_LO, stage, (~0ULL >> (64 - COUNTER_WIDTH)) & 0xffffffff), \
-    REG_INFO_STAGE(TERMINAL_HI, stage, (~0ULL >> (64 - COUNTER_WIDTH)) >> 32), \
-    REG_INFO_STAGE(COUNT_LO,    stage, 0x0), \
-    REG_INFO_STAGE(COUNT_HI,    stage, 0x0), \
+    REG_INFO_STAGE(TERMINAL_LO, stage), \
+    REG_INFO_STAGE(TERMINAL_HI, stage), \
+    REG_INFO_STAGE(COUNT_LO,    stage), \
+    REG_INFO_STAGE(COUNT_HI,    stage), \
 
 #if NUM_STAGES >= 1
 REGS_INFO_STAGE(0)
@@ -544,9 +540,9 @@ static void hpsc_wdt_reset(DeviceState *dev)
 
     for (stage = 0; stage < NUM_STAGES; ++stage) {
         s->terminals[stage] = get_staging_terminal(s, stage);
-        DB_PRINT("%s: stage %u: reset: terminal <- %lx (width %u)\n",
+        DB_PRINT("%s: stage %u: reset: terminal <- %lx\n",
                 object_get_canonical_path(OBJECT(s)),
-                stage, s->terminals[stage], COUNTER_WIDTH);
+                stage, s->terminals[stage]);
         timer_reload(s, stage);
         update_irq(s, stage, 0);
     }
@@ -660,6 +656,34 @@ static void hpsc_wdt_realize(DeviceState *dev, Error **errp)
     const char *prefix = object_get_canonical_path(OBJECT(dev));
     unsigned int i;
 
+    // With concept B, choose a width such that, SW can add counts from stages
+    // without overflow, i.e. at most (64 - (NUM_STAGES - 1)) with concept A,
+    // this can be <=64, since SW never needs to add stages together.
+    //
+    // There is an additional limitation from the Qemu timer.h/ptimer.h
+    // backend: period[ns] * count must not overflow a int64_t. Period is at
+    // most 1/(clk_freq_hz/max_tickdiv) * 10^9 ns (= 256, i.e. 8 bits), so
+    // count must be 8 bits smaller (and another -1 bit due to int64_t instead
+    // of uint64_t).
+    uint32_t counter_width = (64 - log2_of_pow2(s->max_tickdiv) - 1);
+    DB_PRINT("%s: reaalize: counter width %u\n",
+            object_get_canonical_path(OBJECT(s)), counter_width);
+
+    for (i = 0; i < NUM_STAGES; ++i) {
+        // assumption: stage regs are first and term register is first stage reg
+        DepRegisterAccessInfo *term_lo = &hpsc_wdt_regs_info[i * NUM_STAGE_REGS];
+        DepRegisterAccessInfo *term_hi = &hpsc_wdt_regs_info[i * NUM_STAGE_REGS + 1];
+        term_lo->reset = (~0ULL >> (64 - counter_width)) & 0xffffffff;
+        term_hi->reset = (~0ULL >> (64 - counter_width)) >> 32;
+        term_lo->rsvd = ~term_lo->reset;
+        term_hi->rsvd = ~term_hi->reset;
+
+        DB_PRINT("%s: reaalize: stage %u: term reset 0x%08x%08x rsvd 0x%08x%08x\n",
+                object_get_canonical_path(OBJECT(s)), i,
+                (uint32_t)term_hi->reset, (uint32_t)term_lo->reset,
+                (uint32_t)term_hi->rsvd, (uint32_t)term_lo->rsvd);
+    }
+
     for (i = 0; i < ARRAY_SIZE(hpsc_wdt_regs_info); ++i) {
         DepRegisterInfo *r =
                     &s->regs_info[hpsc_wdt_regs_info[i].decode.addr / 4];
@@ -714,6 +738,12 @@ static const VMStateDescription vmstate_hpsc_wdt = {
     }
 };
 
+static Property hpsc_wdt_props[] = {
+    DEFINE_PROP_UINT32("clk-freq-hz", HPSCWDTimer, clk_freq_hz, 125000000),
+    DEFINE_PROP_UINT32("max-divider", HPSCWDTimer, max_tickdiv, 32), // f_min=3906250 Hz in spec
+    DEFINE_PROP_END_OF_LIST()
+};
+
 static void hpsc_wdt_class_init(ObjectClass *klass, void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
@@ -722,6 +752,7 @@ static void hpsc_wdt_class_init(ObjectClass *klass, void *data)
     dc->reset = hpsc_wdt_reset;
     dc->realize = hpsc_wdt_realize;
     dc->vmsd = &vmstate_hpsc_wdt;
+    dc->props = hpsc_wdt_props;
 
     fggc->controller_gpios = wdt_gpios;
 }
