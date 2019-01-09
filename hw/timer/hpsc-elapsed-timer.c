@@ -23,15 +23,8 @@
 
 #define DB_PRINT(fmt, args...) DB_PRINT_L(1, fmt, ## args)
 
-#define GPIO_NAME_LAST_TIMEOUT "LAST_TIMEOUT"
-
 #define HPSC_ELAPSED_TIMER(obj) \
      OBJECT_CHECK(HPSCElapsedTimer, (obj), TYPE_HPSC_ELAPSED_TIMER)
-
-#define CONCAT2_(x, y) x ## y
-#define CONCAT2(x, y) CONCAT2_(x, y)
-#define CONCAT4(x, y, v, w) CONCAT2(CONCAT2(x, y), CONCAT2(v, w))
-#define CONCAT5(x, y, z, v, w) CONCAT2(CONCAT4(x, y, z, v), w)
 
 // TODO: is there support for 64-bit registers? to avoid HI,LO
 
@@ -87,13 +80,6 @@ typedef enum {
 #define CMD_EVENT_FIRE     0x03CD
 #define CMD_SYNC_FIRE      0x04CD
 
-struct HPSCElapsedTimer;
-
-typedef struct {
-    struct HPSCElapsedTimer *timer;
-    unsigned stage;
-} stage_ctx_t;
-
 typedef struct HPSCElapsedTimer {
     SysBusDevice parent_obj;
     MemoryRegion iomem;
@@ -107,18 +93,15 @@ typedef struct HPSCElapsedTimer {
     // Main timer
     ptimer_state *ptimer;
     QEMUBH *bh;
-    stage_ctx_t stage_ctx;
 
     // Timer used to schedule the event interrupt
     ptimer_state *ptimer_event;
     QEMUBH *bh_event;
-    stage_ctx_t stage_ctx_event;
 
     uint64_t limit;
     unsigned tick_delta;
     
     qemu_irq irq;
-    uint64_t event;
 
     uint32_t regs[R_MAX];
     DepRegisterInfo regs_info[R_MAX];
@@ -131,8 +114,6 @@ static uint64_t get_count(HPSCElapsedTimer *s)
     DB_PRINT("%s: count -> %lx (face count %lx)\n",
             object_get_canonical_path(OBJECT(s)),
             count, (s->limit - count) * s->tick_delta);
-            
-    //return (s->limit - ptimer_get_count(s->ptimer)) * s->tick_delta;
     return (s->limit - count) * s->tick_delta;
 }
 
@@ -187,7 +168,7 @@ static void execute_cmd(HPSCElapsedTimer *s, cmd_t cmd)
 {
     uint64_t count, event, remaining;
     switch (cmd) {
-        case CMD_CAPTURE: // convert down to up
+        case CMD_CAPTURE:
                 count = get_count(s);
                 s->regs[R_REG_CAPTURED_LO] = (uint32_t)(count & 0xffffffff);
                 s->regs[R_REG_CAPTURED_HI] = (uint32_t)(count >> 32);
@@ -286,7 +267,6 @@ static void post_write_status(DepRegisterInfo *reg, uint64_t val64)
     }
 }
 
-// Terminal values reset to max by spec
 static DepRegisterAccessInfo hpsc_elapsed_regs_info[] = {
     { .name = "REG_CAPTURED_LO",
         .decode.addr = A_REG_CAPTURED_LO,
