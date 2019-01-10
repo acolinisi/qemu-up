@@ -90,6 +90,8 @@ typedef struct HPSCElapsedTimer {
     uint32_t max_tickdiv;
     uint64_t max_count; // a derived prop
 
+    uint32_t freq_hz; // after divider applied
+
     // Main timer
     ptimer_state *ptimer;
     QEMUBH *bh;
@@ -108,6 +110,11 @@ typedef struct HPSCElapsedTimer {
 } HPSCElapsedTimer;
 
 
+// Convert from units of time (given by the "nominal" frequency) to ptimer units
+static uint64_t time_to_ticks(HPSCElapsedTimer *s, uint64_t time)
+{
+    return time / s->tick_delta;
+}
 static uint64_t get_count(HPSCElapsedTimer *s)
 {
     uint64_t count = ptimer_get_count(s->ptimer);
@@ -127,21 +134,21 @@ static void set_count(HPSCElapsedTimer *s, uint64_t count)
 
 static void timer_update_freq(HPSCElapsedTimer *s)
 {
-
     uint32_t tickdiv = extract32(s->regs[R_REG_CONFIG_LO],
             R_REG_CONFIG_LO_TICKDIV_SHIFT, R_REG_CONFIG_LO_TICKDIV_LENGTH) + 1;
-    uint32_t freq = s->clk_freq_hz / tickdiv;
-    s->tick_delta = s->nominal_freq_hz / freq;
+    s->freq_hz = s->clk_freq_hz / tickdiv;
+    s->tick_delta = s->nominal_freq_hz / s->freq_hz;
 
     // since user-facing count is internal count * delta, we limit the max
     // internal count so that that product does not overflow
     s->limit = s->max_count / s->tick_delta;
 
     DB_PRINT("%s: update freq <- %u (tickdiv %u tick delta %u max count %lx)\n",
-            object_get_canonical_path(OBJECT(s)), freq, tickdiv, s->tick_delta, s->limit);
+            object_get_canonical_path(OBJECT(s)), s->freq_hz, tickdiv, s->tick_delta, s->limit);
 
-    ptimer_set_freq(s->ptimer, freq);
-    ptimer_set_freq(s->ptimer_event, freq);
+    ptimer_set_freq(s->ptimer, s->freq_hz);
+    ptimer_set_freq(s->ptimer_event, s->freq_hz);
+
 
     ptimer_set_limit(s->ptimer, s->limit, /* reload? */ 1);
 
@@ -166,7 +173,7 @@ static void timer_sync(HPSCElapsedTimer *s)
 
 static void execute_cmd(HPSCElapsedTimer *s, cmd_t cmd)
 {
-    uint64_t count, event, remaining;
+    uint64_t count, event, remaining, remaining_ticks;
     switch (cmd) {
         case CMD_CAPTURE:
                 count = get_count(s);
@@ -191,12 +198,12 @@ static void execute_cmd(HPSCElapsedTimer *s, cmd_t cmd)
                 } else { // in the past
                     remaining = count + event;
                 }
-                remaining /= s->tick_delta;
-                ptimer_set_limit(s->ptimer_event, remaining, /* reload? */ 1);
+                remaining_ticks = time_to_ticks(s, remaining);
+                ptimer_set_limit(s->ptimer_event, remaining_ticks, /* reload? */ 1);
                 ptimer_run(s->ptimer_event, PTIMER_MODE_CONT);
 
-                DB_PRINT("%s: cmd: event timer count <- %lx\n",
-                         object_get_canonical_path(OBJECT(s)), remaining);
+                DB_PRINT("%s: cmd: event timer count <- %lx ticks (%lx time)\n",
+                         object_get_canonical_path(OBJECT(s)), remaining_ticks, remaining);
                 break;
         case CMD_SYNC:
                 timer_sync(s);
@@ -421,8 +428,8 @@ static void main_timer_rollover(void *opaque)
 static void event_timer_rollover(void *opaque)
 {
     HPSCElapsedTimer *s = opaque;
+    DB_PRINT("%s: event rollover\n", object_get_canonical_path(OBJECT(s)));
 
-    DB_PRINT("%s: event tick\n", object_get_canonical_path(OBJECT(s)));
     s->regs[R_REG_STATUS] |= R_REG_STATUS_EVENT_MASK;
     qemu_set_irq(s->irq, 1);
 }
