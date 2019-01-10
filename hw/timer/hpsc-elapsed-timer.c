@@ -10,7 +10,7 @@
 #include "hw/fdt_generic_util.h"
 
 #ifndef HPSC_ELAPSED_TIMER_ERR_DEBUG
-#define HPSC_ELAPSED_TIMER_ERR_DEBUG 1
+#define HPSC_ELAPSED_TIMER_ERR_DEBUG 0
 #endif
 
 #define TYPE_HPSC_ELAPSED_TIMER "hpsc,hpsc-elapsed-timer"
