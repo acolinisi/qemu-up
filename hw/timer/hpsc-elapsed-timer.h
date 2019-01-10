@@ -12,6 +12,10 @@ typedef void (hpsc_elapsed_timer_event_cb)(void *arg);
 
 uint64_t hpsc_elapsed_timer_get_count(struct HPSCElapsedTimer *s);
 
+// Ideally, max count would be constant ~0ULL, but due to limitations in
+// the backedn, we can't have all 64-bits (see comments in the model code).
+uint64_t hpsc_elapsed_timer_get_max_count(struct HPSCElapsedTimer *s);
+
 struct HPSCElapsedTimerEvent *
 hpsc_elapsed_timer_event_create(struct HPSCElapsedTimer *s,
                                 hpsc_elapsed_timer_event_cb *cb, void *cb_arg);

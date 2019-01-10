@@ -456,6 +456,11 @@ uint64_t hpsc_elapsed_timer_get_count(HPSCElapsedTimer *s)
     return get_count(s);
 }
 
+uint64_t hpsc_elapsed_timer_get_max_count(HPSCElapsedTimer *s)
+{
+    return s->max_count;
+}
+
 struct HPSCElapsedTimerEvent *
 hpsc_elapsed_timer_event_create(struct HPSCElapsedTimer *s,
                                 hpsc_elapsed_timer_event_cb *cb, void *cb_arg)
