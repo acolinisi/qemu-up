@@ -170,10 +170,10 @@ static DepRegisterAccessInfo hpsc_rti_regs_info[] = {
         .ro = ~0,
     },{ .name = "REG_INTERVAL_LO",
         .decode.addr = A_REG_INTERVAL_LO,
-        .reset = 0x0,
+         //.reset = ~0x0, // set to parent timer's max count on reset
     },{ .name = "REG_INTERVAL_HI",
         .decode.addr = A_REG_INTERVAL_HI,
-        .reset = 0x0,
+         //.reset = ~0x0, // set to parent timer's max count on reset
     },{ .name = "REG_CMD_ARM",
         .decode.addr = A_REG_CMD_ARM,
         .reset = 0x0,
@@ -263,6 +263,18 @@ static void hpsc_rti_realize(DeviceState *dev, Error **errp)
     HPSCRTITimer *s = HPSC_RTI_TIMER(dev);
     const char *prefix = object_get_canonical_path(OBJECT(dev));
     unsigned int i;
+    uint64_t max_count;
+    DepRegisterAccessInfo *rai;
+
+    // Ideally, max count would be constant ~0ULL, but due to limitations in
+    // the backedn, we can't have all 64-bits (see Elapsed Timer model).
+    max_count = hpsc_elapsed_timer_get_max_count(s->etimer);
+    rai = &hpsc_rti_regs_info[R_REG_INTERVAL_HI];
+    rai->reset = max_count >> 32;
+    rai->rsvd = ~rai->reset;
+    rai = &hpsc_rti_regs_info[R_REG_INTERVAL_LO];
+    rai->reset = max_count & 0xffffffff;
+    rai->rsvd = ~rai->reset;
 
     for (i = 0; i < ARRAY_SIZE(hpsc_rti_regs_info); ++i) {
         DepRegisterInfo *r =
