@@ -9,11 +9,11 @@
 #include "hw/ptimer.h"
 #include "hw/fdt_generic_util.h"
 
+#include "hpsc-elapsed-timer.h"
+
 #ifndef HPSC_ELAPSED_TIMER_ERR_DEBUG
 #define HPSC_ELAPSED_TIMER_ERR_DEBUG 0
 #endif
-
-#define TYPE_HPSC_ELAPSED_TIMER "hpsc,hpsc-elapsed-timer"
 
 #define DB_PRINT_L(lvl, fmt, args...) do {\
     if (HPSC_ELAPSED_TIMER_ERR_DEBUG >= lvl) {\
@@ -80,6 +80,8 @@ typedef enum {
 #define CMD_EVENT_FIRE     0x03CD
 #define CMD_SYNC_FIRE      0x04CD
 
+struct HPSCElapsedTimerEvent;
+
 typedef struct HPSCElapsedTimer {
     SysBusDevice parent_obj;
     MemoryRegion iomem;
@@ -100,6 +102,8 @@ typedef struct HPSCElapsedTimer {
     ptimer_state *ptimer_event;
     QEMUBH *bh_event;
 
+    QLIST_HEAD(se_list_head, HPSCElapsedTimerEvent) slave_events;
+
     uint64_t limit;
     unsigned tick_delta;
     
@@ -108,6 +112,15 @@ typedef struct HPSCElapsedTimer {
     uint32_t regs[R_MAX];
     DepRegisterInfo regs_info[R_MAX];
 } HPSCElapsedTimer;
+
+// Slave timers clocked by the Elapsed Timer can schedule events
+typedef struct HPSCElapsedTimerEvent {
+    QLIST_ENTRY(HPSCElapsedTimerEvent) list_entry;
+
+    HPSCElapsedTimer *etimer;
+    ptimer_state *ptimer;
+    QEMUBH *bh;
+} HPSCElapsedTimerEvent;
 
 
 // Convert from units of time (given by the "nominal" frequency) to ptimer units
@@ -149,6 +162,10 @@ static void timer_update_freq(HPSCElapsedTimer *s)
     ptimer_set_freq(s->ptimer, s->freq_hz);
     ptimer_set_freq(s->ptimer_event, s->freq_hz);
 
+    HPSCElapsedTimerEvent *e;
+    QLIST_FOREACH(e, &s->slave_events, list_entry) {
+        ptimer_set_freq(e->ptimer, s->freq_hz);
+    }
 
     ptimer_set_limit(s->ptimer, s->limit, /* reload? */ 1);
 
@@ -434,6 +451,45 @@ static void event_timer_rollover(void *opaque)
     qemu_set_irq(s->irq, 1);
 }
 
+uint64_t hpsc_elapsed_timer_get_count(HPSCElapsedTimer *s)
+{
+    return get_count(s);
+}
+
+struct HPSCElapsedTimerEvent *
+hpsc_elapsed_timer_event_create(struct HPSCElapsedTimer *s,
+                                hpsc_elapsed_timer_event_cb *cb, void *cb_arg)
+{
+    HPSCElapsedTimerEvent *e = g_malloc0(sizeof(HPSCElapsedTimerEvent));
+    e->etimer = s;
+    e->bh = qemu_bh_new(cb, cb_arg);
+    e->ptimer = ptimer_init(e->bh, PTIMER_POLICY_DEFAULT);
+    QLIST_INSERT_HEAD(&s->slave_events, e, list_entry);
+    return e;
+}
+void hpsc_elapsed_timer_event_destroy(struct HPSCElapsedTimerEvent *e)
+{
+    assert(e);
+    QLIST_REMOVE(e, list_entry);
+    ptimer_free(e->ptimer); // deletes bh
+    e->etimer = NULL;
+    e->ptimer = NULL;
+    e->bh = NULL;
+    g_free(e);
+}
+
+void hpsc_elapsed_timer_event_schedule(HPSCElapsedTimerEvent *e, uint64_t time)
+{
+    assert(e && e->ptimer);
+    uint64_t delta = time - get_count(e->etimer);
+    uint64_t delta_ticks = time_to_ticks(e->etimer, delta);
+    DB_PRINT("%s: slave event sched @ %lx time (delta %lx time = %lx ticks)\n",
+             object_get_canonical_path(OBJECT(e->etimer)),
+             time, delta, delta_ticks);
+    ptimer_set_count(e->ptimer, delta_ticks);
+    ptimer_run(e->ptimer, PTIMER_MODE_ONE_SHOT);
+}
+
 static const MemoryRegionOps hpsc_elapsed_ops = {
     .access = hpsc_elapsed_access,
     .endianness = DEVICE_LITTLE_ENDIAN,
@@ -479,6 +535,8 @@ static void hpsc_elapsed_realize(DeviceState *dev, Error **errp)
 
     s->bh_event = qemu_bh_new(event_timer_rollover, s);
     s->ptimer_event = ptimer_init(s->bh_event, PTIMER_POLICY_DEFAULT);
+
+    QLIST_INIT(&s->slave_events);
 }
 
 static void hpsc_elapsed_init(Object *obj)
