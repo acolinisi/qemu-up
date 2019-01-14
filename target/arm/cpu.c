@@ -768,8 +768,14 @@ static void arm_cpu_initfn(Object *obj)
 
     qdev_init_gpio_in_named(DEVICE(cpu), arm_cpu_set_ncpuhalt, "ncpuhalt", 1);
 
-    qdev_init_gpio_out(DEVICE(cpu), cpu->gt_timer_outputs,
-                       ARRAY_SIZE(cpu->gt_timer_outputs));
+    qdev_init_gpio_out_named(DEVICE(cpu), &cpu->gt_timer_outputs[GTIMER_PHYS],
+                                    "timer_phys", 1);
+    qdev_init_gpio_out_named(DEVICE(cpu), &cpu->gt_timer_outputs[GTIMER_VIRT],
+                                    "timer_virt", 1);
+    qdev_init_gpio_out_named(DEVICE(cpu), &cpu->gt_timer_outputs[GTIMER_HYP],
+                                    "timer_hyp", 1);
+    qdev_init_gpio_out_named(DEVICE(cpu), &cpu->gt_timer_outputs[GTIMER_SEC],
+                                    "timer_sec", 1);
 
     qdev_init_gpio_out_named(DEVICE(cpu), &cpu->gicv3_maintenance_interrupt,
                              "gicv3-maintenance-interrupt", 1);
