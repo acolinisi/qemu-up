@@ -62,6 +62,7 @@ typedef struct HPSCRTITimer {
     struct HPSCElapsedTimer *etimer;
     struct HPSCElapsedTimerEvent *etimer_event;
 
+    uint64_t max_count;
     uint64_t start_count;
     uint64_t interval;
 
@@ -159,6 +160,18 @@ static void post_write_cmd_fire(DepRegisterInfo *reg, uint64_t val64)
     }
 }
 
+static uint64_t pre_write_interval_lo(DepRegisterInfo *reg, uint64_t val)
+{
+    HPSCRTITimer *s = HPSC_RTI_TIMER(reg->opaque);
+    return val & (s->max_count & 0xffffffff);
+}
+
+static uint64_t pre_write_interval_hi(DepRegisterInfo *reg, uint64_t val)
+{
+    HPSCRTITimer *s = HPSC_RTI_TIMER(reg->opaque);
+    return val & (s->max_count >> 32);
+}
+
 static DepRegisterAccessInfo hpsc_rti_regs_info[] = {
     { .name = "REG_COUNT_LO",
         .decode.addr = A_REG_COUNT_LO,
@@ -171,9 +184,11 @@ static DepRegisterAccessInfo hpsc_rti_regs_info[] = {
     },{ .name = "REG_INTERVAL_LO",
         .decode.addr = A_REG_INTERVAL_LO,
          //.reset = ~0x0, // set to parent timer's max count on reset
+        .pre_write = pre_write_interval_lo,
     },{ .name = "REG_INTERVAL_HI",
         .decode.addr = A_REG_INTERVAL_HI,
          //.reset = ~0x0, // set to parent timer's max count on reset
+        .pre_write = pre_write_interval_hi,
     },{ .name = "REG_CMD_ARM",
         .decode.addr = A_REG_CMD_ARM,
         .reset = 0x0,
@@ -263,18 +278,20 @@ static void hpsc_rti_realize(DeviceState *dev, Error **errp)
     HPSCRTITimer *s = HPSC_RTI_TIMER(dev);
     const char *prefix = object_get_canonical_path(OBJECT(dev));
     unsigned int i;
-    uint64_t max_count;
     DepRegisterAccessInfo *rai;
 
     // Ideally, max count would be constant ~0ULL, but due to limitations in
     // the backedn, we can't have all 64-bits (see Elapsed Timer model).
-    max_count = hpsc_elapsed_timer_get_max_count(s->etimer);
+    s->max_count = hpsc_elapsed_timer_get_max_count(s->etimer);
     rai = &hpsc_rti_regs_info[R_REG_INTERVAL_HI];
-    rai->reset = max_count >> 32;
+    rai->reset = s->max_count >> 32;
     rai->rsvd = ~rai->reset;
     rai = &hpsc_rti_regs_info[R_REG_INTERVAL_LO];
-    rai->reset = max_count & 0xffffffff;
+    rai->reset = s->max_count & 0xffffffff;
     rai->rsvd = ~rai->reset;
+
+    DB_PRINT("%s: max count: %lx\n",
+             object_get_canonical_path(OBJECT(s)), s->max_count);
 
     for (i = 0; i < ARRAY_SIZE(hpsc_rti_regs_info); ++i) {
         DepRegisterInfo *r =
