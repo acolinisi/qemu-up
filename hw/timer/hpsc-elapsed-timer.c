@@ -31,6 +31,12 @@
 #define HPSC_ELAPSED_TIMER_EVENT(obj) \
      OBJECT_CHECK(HPSCElapsedTimerEvent, (obj), TYPE_HPSC_ELAPSED_TIMER_EVENT)
 
+/* This timer's counter register is in fixed units, regardless of
+ * the clock frequency, which means that on each clock cycle the
+ * timer may increment by a delta of more than 1. This macro
+ * specifies the fixed units. */
+#define NOMINAL_FREQ_HZ 1000000000 /* 1 GHz for fixed units of ns */
+
 // TODO: is there support for 64-bit registers? to avoid HI,LO
 
 DEP_REG32(REG_CAPTURED_LO,      0x00)
@@ -100,7 +106,6 @@ typedef struct HPSCElapsedTimer {
     MemoryRegion iomem;
 
     // const props from DT
-    uint32_t nominal_freq_hz; // determines count reg units regardless of clk
     uint32_t clk_freq_hz;
     uint32_t max_tickdiv;
     uint64_t max_count;
@@ -155,7 +160,7 @@ static void timer_update_freq(HPSCElapsedTimer *s)
     uint32_t tickdiv = extract32(s->regs[R_REG_CONFIG_LO],
             R_REG_CONFIG_LO_TICKDIV_SHIFT, R_REG_CONFIG_LO_TICKDIV_LENGTH) + 1;
     s->freq_hz = s->clk_freq_hz / tickdiv;
-    s->tick_delta = s->nominal_freq_hz / s->freq_hz;
+    s->tick_delta = NOMINAL_FREQ_HZ / s->freq_hz;
 
     // since user-facing count is internal count * delta, we limit the max
     // internal count so that that product does not overflow
@@ -547,7 +552,7 @@ static void hpsc_elapsed_realize(DeviceState *dev, Error **errp)
     DB_PRINT("%s: init: max_tickdiv %x max_count %lx\n",
              object_get_canonical_path(OBJECT(s)), s->max_tickdiv, s->max_count);
 
-    s->max_delta = s->nominal_freq_hz / s->clk_freq_hz;
+    s->max_delta = NOMINAL_FREQ_HZ / s->clk_freq_hz;
 
     for (i = 0; i < ARRAY_SIZE(hpsc_elapsed_regs_info); ++i) {
         DepRegisterInfo *r =
@@ -599,7 +604,6 @@ static const VMStateDescription vmstate_hpsc_elapsed = {
 };
 
 static Property hpsc_elapsed_props[] = {
-    DEFINE_PROP_UINT32("nominal-freq-hz", HPSCElapsedTimer, nominal_freq_hz, 1000000000), // s.t. count units = ns
     DEFINE_PROP_UINT32("clk-freq-hz",  HPSCElapsedTimer,    clk_freq_hz,      125000000),
     DEFINE_PROP_UINT32("max-divider", HPSCElapsedTimer,     max_tickdiv, 32), // f_min=3906250 Hz in spec
     DEFINE_PROP_END_OF_LIST()
