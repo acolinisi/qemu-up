@@ -20,6 +20,7 @@
 #include "fpu/softfloat.h"
 #include "qemu/range.h"
 #include "qapi/qapi-commands-target.h"
+#include "hw/arm/arm-system-counter.h"
 
 #define ARM_CPU_FREQ 1000000000 /* FIXME: 1 GHz, should be configurable */
 
@@ -2644,12 +2645,17 @@ static CPAccessResult gt_stimer_access(CPUARMState *env,
 
 static uint64_t gt_get_countervalue(CPUARMState *env)
 {
-    return qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) / GTIMER_SCALE;
+    ARMCPU *cpu = container_of(env, ARMCPU, env);
+    ARMSystemCounterClass *ascc =
+        ARM_SYSTEM_COUNTER_GET_CLASS(cpu->sys_counter);
+    return ascc->count(cpu->sys_counter) / cpu->gt_scale;
 }
 
 static void gt_recalc_timer(ARMCPU *cpu, int timeridx)
 {
     ARMGenericTimer *gt = &cpu->env.cp15.c14_timer[timeridx];
+    ARMSystemCounterClass *ascc =
+        ARM_SYSTEM_COUNTER_GET_CLASS(cpu->sys_counter);
 
     if (gt->ctl & 1) {
         /* Timer enabled: calculate and set current ISTATUS, irq, and
@@ -2670,26 +2676,42 @@ static void gt_recalc_timer(ARMCPU *cpu, int timeridx)
 
         if (istatus) {
             /* Next transition is when count rolls back over to zero */
-            nexttick = UINT64_MAX;
+            nexttick = cpu->gt_max_count;
         } else {
             /* Next transition is when we hit cval */
             nexttick = gt->cval + offset;
         }
         /* Note that the desired next expiry time might be beyond the
-         * signed-64-bit range of a QEMUTimer -- in this case we just
+         * range of a system counter-- in this case we just
          * set the timer for as far in the future as possible. When the
          * timer expires we will reset the timer for any remaining period.
+         *
+         * That is the case when CVAL is within range, but offset takes the
+         * next tick out of range: after this method runs after rollover, the
+         * sum will no longer be out of range, so at that point the next tick
+         * will be scheduled for the remaining time.
+         *
+         * But, note that, if CVAL is out of range of the system counter, then,
+         * the timer event (i.e.  the interrupt) will never happen (this method
+         * will be called repeately on each rollover). The ARMv8 spec doesn't
+         * discuss this case, and this seems like reasonable behavior.
+         *
+         * Also, note that we do not handle integer overflow in the CVAL +
+         * offset addition. The only way to get overflow is if CVAL >= 63 bits,
+         * which would put it out of range of most system counters (ARM spec
+         * requires >56 bits, e.g.), so correct software won't set CVAL to a
+         * value that would cause this overflow.
          */
-        if (nexttick > INT64_MAX / GTIMER_SCALE) {
-            nexttick = INT64_MAX / GTIMER_SCALE;
-        }
-        timer_mod(cpu->gt_timer[timeridx], nexttick);
+        if (nexttick > cpu->gt_max_count)
+            nexttick = cpu->gt_max_count;
+
+        ascc->event_schedule(cpu->sys_counter_events[timeridx], nexttick * cpu->gt_scale);
         trace_arm_gt_recalc(timeridx, irqstate, nexttick);
     } else {
         /* Timer disabled: ISTATUS and timer output always clear */
         gt->ctl &= ~4;
         qemu_set_irq(cpu->gt_timer_outputs[timeridx], 0);
-        timer_del(cpu->gt_timer[timeridx]);
+        ascc->event_cancel(cpu->sys_counter_events[timeridx]);
         trace_arm_gt_recalc_disabled(timeridx);
     }
 }
@@ -2698,8 +2720,9 @@ static void gt_timer_reset(CPUARMState *env, const ARMCPRegInfo *ri,
                            int timeridx)
 {
     ARMCPU *cpu = arm_env_get_cpu(env);
-
-    timer_del(cpu->gt_timer[timeridx]);
+    ARMSystemCounterClass *ascc =
+        ARM_SYSTEM_COUNTER_GET_CLASS(cpu->sys_counter);
+    ascc->event_cancel(cpu->sys_counter_events[timeridx]);
 }
 
 static uint64_t gt_cnt_read(CPUARMState *env, const ARMCPRegInfo *ri)
