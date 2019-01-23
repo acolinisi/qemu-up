@@ -11,6 +11,7 @@ obj-$(TARGET_AARCH64) += cpu64.o translate-a64.o helper-a64.o gdbstub64.o
 obj-$(TARGET_AARCH64) += pauth_helper.o
 obj-y += crypto_helper.o
 obj-$(CONFIG_SOFTMMU) += arm-powerctl.o
+obj-y += arm-system-counter.o
 
 DECODETREE = $(SRC_PATH)/scripts/decodetree.py
 
