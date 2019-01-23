@@ -7,8 +7,7 @@
 #include "qemu/timer.h"
 #include "qemu/main-loop.h"
 #include "hw/ptimer.h"
-#include "hw/fdt_generic_util.h"
-#include "hw/timer/hpsc-elapsed-timer.h"
+#include "hw/arm/arm-system-counter.h"
 
 #ifndef HPSC_RTI_TIMER_ERR_DEBUG
 #define HPSC_RTI_TIMER_ERR_DEBUG 0
@@ -59,8 +58,8 @@ typedef struct HPSCRTITimer {
     SysBusDevice parent_obj;
     MemoryRegion iomem;
 
-    struct HPSCElapsedTimer *etimer;
-    struct HPSCElapsedTimerEvent *etimer_event;
+    ARMSystemCounter *sys_counter;
+    ARMSystemCounterEvent *sys_counter_event;
 
     uint64_t max_count;
     uint64_t start_count;
@@ -75,7 +74,8 @@ typedef struct HPSCRTITimer {
 
 static uint64_t get_count(HPSCRTITimer *s)
 {
-    uint64_t count = hpsc_elapsed_timer_get_count(s->etimer);
+    ARMSystemCounterClass *ascc = ARM_SYSTEM_COUNTER_GET_CLASS(s->sys_counter);
+    uint64_t count = ascc->count(s->sys_counter);
     DB_PRINT("%s: count -> %lx\n",
             object_get_canonical_path(OBJECT(s)), count);
     return count;
@@ -83,19 +83,20 @@ static uint64_t get_count(HPSCRTITimer *s)
 
 static void schedule_event(HPSCRTITimer *s)
 {
-    uint64_t event;
+    uint64_t event_time;
+    ARMSystemCounterClass *ascc = ARM_SYSTEM_COUNTER_GET_CLASS(s->sys_counter);
 
     s->start_count = get_count(s);
-    event = s->start_count + s->interval;
+    event_time = s->start_count + s->interval;
     DB_PRINT("%s: sched event @ %lx\n",
-            object_get_canonical_path(OBJECT(s)), event);
-    hpsc_elapsed_timer_event_schedule(s->etimer_event, event);
+            object_get_canonical_path(OBJECT(s)), event_time);
+    ascc->event_schedule(s->sys_counter_event, event_time);
 }
 
-static void etimer_event_cb(void *opaque)
+static void sys_counter_event_cb(void *opaque)
 {
     HPSCRTITimer *s = opaque;
-    DB_PRINT("%s: etimer event cb\n", object_get_canonical_path(OBJECT(s)));
+    DB_PRINT("%s: sys_counter event cb\n", object_get_canonical_path(OBJECT(s)));
 
     // Generate an edge, the interrupt controller should latch it
     qemu_set_irq(s->irq, 1);
@@ -279,10 +280,11 @@ static void hpsc_rti_realize(DeviceState *dev, Error **errp)
     const char *prefix = object_get_canonical_path(OBJECT(dev));
     unsigned int i;
     DepRegisterAccessInfo *rai;
+    ARMSystemCounterClass *ascc = ARM_SYSTEM_COUNTER_GET_CLASS(s->sys_counter);
 
     // Ideally, max count would be constant ~0ULL, but due to limitations in
     // the backedn, we can't have all 64-bits (see Elapsed Timer model).
-    s->max_count = hpsc_elapsed_timer_get_max_count(s->etimer);
+    s->max_count = ascc->max_count(s->sys_counter);
     rai = &hpsc_rti_regs_info[R_REG_INTERVAL_HI];
     rai->reset = s->max_count >> 32;
     rai->rsvd = ~rai->reset;
@@ -292,6 +294,9 @@ static void hpsc_rti_realize(DeviceState *dev, Error **errp)
 
     DB_PRINT("%s: max count: %lx\n",
              object_get_canonical_path(OBJECT(s)), s->max_count);
+
+    s->sys_counter_event = ascc->event_create(s->sys_counter,
+                                        sys_counter_event_cb, s);
 
     for (i = 0; i < ARRAY_SIZE(hpsc_rti_regs_info); ++i) {
         DepRegisterInfo *r =
@@ -309,9 +314,13 @@ static void hpsc_rti_realize(DeviceState *dev, Error **errp)
         dep_register_init(r);
         qdev_pass_all_gpios(DEVICE(r), dev);
     }
+}
 
-    s->etimer_event = hpsc_elapsed_timer_event_create(s->etimer,
-                                etimer_event_cb, s);
+static void hpsc_rti_finalize(Object *obj)
+{
+    HPSCRTITimer *s = HPSC_RTI_TIMER(obj);
+    ARMSystemCounterClass *ascc = ARM_SYSTEM_COUNTER_GET_CLASS(s->sys_counter);
+    ascc->event_destroy(s->sys_counter_event);
 }
 
 static void hpsc_rti_init(Object *obj)
@@ -325,9 +334,8 @@ static void hpsc_rti_init(Object *obj)
 
     sysbus_init_irq(SYS_BUS_DEVICE(s), &s->irq);
 
-    // TODO: define an interface instead of depending on Elapsed Timer directly
-    object_property_add_link(obj, "master-timer", TYPE_HPSC_ELAPSED_TIMER,
-                             (Object **)&s->etimer,
+    object_property_add_link(obj, "arm-system-counter", TYPE_ARM_SYSTEM_COUNTER,
+                             (Object **)&s->sys_counter,
                              qdev_prop_allow_set_link_before_realize,
                              OBJ_PROP_LINK_UNREF_ON_RELEASE,
                              &error_abort);
@@ -364,6 +372,7 @@ static const TypeInfo hpsc_rti_info = {
     .instance_size = sizeof(HPSCRTITimer),
     .class_init    = hpsc_rti_class_init,
     .instance_init = hpsc_rti_init,
+    .instance_finalize = hpsc_rti_finalize,
 };
 
 static void hpsc_rti_register_types(void)
