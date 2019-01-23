@@ -8,8 +8,7 @@
 #include "qemu/main-loop.h"
 #include "hw/ptimer.h"
 #include "hw/fdt_generic_util.h"
-
-#include "hpsc-elapsed-timer.h"
+#include "hw/arm/arm-system-counter.h"
 
 #ifndef HPSC_ELAPSED_TIMER_ERR_DEBUG
 #define HPSC_ELAPSED_TIMER_ERR_DEBUG 0
@@ -23,8 +22,14 @@
 
 #define DB_PRINT(fmt, args...) DB_PRINT_L(1, fmt, ## args)
 
+#define TYPE_HPSC_ELAPSED_TIMER         "hpsc-elapsed-timer"
+#define TYPE_HPSC_ELAPSED_TIMER_EVENT   "hpsc-elapsed-timer-event"
+
 #define HPSC_ELAPSED_TIMER(obj) \
      OBJECT_CHECK(HPSCElapsedTimer, (obj), TYPE_HPSC_ELAPSED_TIMER)
+
+#define HPSC_ELAPSED_TIMER_EVENT(obj) \
+     OBJECT_CHECK(HPSCElapsedTimerEvent, (obj), TYPE_HPSC_ELAPSED_TIMER_EVENT)
 
 // TODO: is there support for 64-bit registers? to avoid HI,LO
 
@@ -80,7 +85,15 @@ typedef enum {
 #define CMD_EVENT_FIRE     0x03CD
 #define CMD_SYNC_FIRE      0x04CD
 
-struct HPSCElapsedTimerEvent;
+typedef struct HPSCElapsedTimerEvent {
+    ARMSystemCounterEvent parent_obj;
+
+    QLIST_ENTRY(HPSCElapsedTimerEvent) list_entry;
+
+    ptimer_state *ptimer;
+    QEMUBH *bh;
+} HPSCElapsedTimerEvent;
+
 
 typedef struct HPSCElapsedTimer {
     SysBusDevice parent_obj;
@@ -90,7 +103,8 @@ typedef struct HPSCElapsedTimer {
     uint32_t nominal_freq_hz; // determines count reg units regardless of clk
     uint32_t clk_freq_hz;
     uint32_t max_tickdiv;
-    uint64_t max_count; // a derived prop
+    uint64_t max_count;
+    unsigned max_delta;
 
     uint32_t freq_hz; // after divider applied
 
@@ -112,15 +126,6 @@ typedef struct HPSCElapsedTimer {
     uint32_t regs[R_MAX];
     DepRegisterInfo regs_info[R_MAX];
 } HPSCElapsedTimer;
-
-// Slave timers clocked by the Elapsed Timer can schedule events
-typedef struct HPSCElapsedTimerEvent {
-    QLIST_ENTRY(HPSCElapsedTimerEvent) list_entry;
-
-    HPSCElapsedTimer *etimer;
-    ptimer_state *ptimer;
-    QEMUBH *bh;
-} HPSCElapsedTimerEvent;
 
 
 // Convert from units of time (given by the "nominal" frequency) to ptimer units
@@ -451,48 +456,72 @@ static void event_timer_rollover(void *opaque)
     qemu_set_irq(s->irq, 1);
 }
 
-uint64_t hpsc_elapsed_timer_get_count(HPSCElapsedTimer *s)
+static uint64_t hpsc_elapsed_timer_max_count(ARMSystemCounter *asc)
 {
-    return get_count(s);
-}
-
-uint64_t hpsc_elapsed_timer_get_max_count(HPSCElapsedTimer *s)
-{
+    HPSCElapsedTimer *s = HPSC_ELAPSED_TIMER(asc);
     return s->max_count;
 }
 
-struct HPSCElapsedTimerEvent *
-hpsc_elapsed_timer_event_create(struct HPSCElapsedTimer *s,
-                                hpsc_elapsed_timer_event_cb *cb, void *cb_arg)
+static unsigned hpsc_elapsed_timer_max_delta(ARMSystemCounter *asc)
 {
-    HPSCElapsedTimerEvent *e = g_malloc0(sizeof(HPSCElapsedTimerEvent));
-    e->etimer = s;
-    e->bh = qemu_bh_new(cb, cb_arg);
-    e->ptimer = ptimer_init(e->bh, PTIMER_POLICY_DEFAULT);
-    QLIST_INSERT_HEAD(&s->slave_events, e, list_entry);
-    return e;
-}
-void hpsc_elapsed_timer_event_destroy(struct HPSCElapsedTimerEvent *e)
-{
-    assert(e);
-    QLIST_REMOVE(e, list_entry);
-    ptimer_free(e->ptimer); // deletes bh
-    e->etimer = NULL;
-    e->ptimer = NULL;
-    e->bh = NULL;
-    g_free(e);
+    HPSCElapsedTimer *s = HPSC_ELAPSED_TIMER(asc);
+    return s->max_delta;
 }
 
-void hpsc_elapsed_timer_event_schedule(HPSCElapsedTimerEvent *e, uint64_t time)
+static uint64_t hpsc_elapsed_timer_count(ARMSystemCounter *asc)
 {
-    assert(e && e->ptimer);
-    uint64_t delta = time - get_count(e->etimer);
-    uint64_t delta_ticks = time_to_ticks(e->etimer, delta);
+    HPSCElapsedTimer *s = HPSC_ELAPSED_TIMER(asc);
+    return get_count(s);
+}
+
+static ARMSystemCounterEvent *hpsc_elapsed_timer_event_create(
+                                        ARMSystemCounter *asc,
+                                        ARMSystemCounterEventCb *cb, void *arg)
+{
+    HPSCElapsedTimer *s = HPSC_ELAPSED_TIMER(asc);
+    HPSCElapsedTimerEvent *he =
+        HPSC_ELAPSED_TIMER_EVENT(object_new(TYPE_HPSC_ELAPSED_TIMER_EVENT));
+    ARMSystemCounterEvent *e = ARM_SYSTEM_COUNTER_EVENT(he);
+    e->sc = asc;
+    he->bh = qemu_bh_new(cb, arg);
+    he->ptimer = ptimer_init(he->bh, PTIMER_POLICY_DEFAULT);
+    QLIST_INSERT_HEAD(&s->slave_events, he, list_entry);
+    return e;
+}
+
+static void hpsc_elapsed_timer_event_destroy(ARMSystemCounterEvent *e)
+{
+    HPSCElapsedTimerEvent *he = HPSC_ELAPSED_TIMER_EVENT(e);
+    e->sc = NULL;
+    QLIST_REMOVE(he, list_entry);
+    ptimer_free(he->ptimer); // deletes bh
+    he->ptimer = NULL;
+    he->bh = NULL;
+    object_unref(OBJECT(he));
+}
+
+static void hpsc_elapsed_timer_event_schedule(ARMSystemCounterEvent *e,
+                                              uint64_t time)
+{
+    HPSCElapsedTimerEvent *he = HPSC_ELAPSED_TIMER_EVENT(e);
+    HPSCElapsedTimer *s = HPSC_ELAPSED_TIMER(e->sc);
+    uint64_t delta = time - get_count(s);
+    uint64_t delta_ticks = time_to_ticks(s, delta);
     DB_PRINT("%s: slave event sched @ %lx time (delta %lx time = %lx ticks)\n",
-             object_get_canonical_path(OBJECT(e->etimer)),
+             object_get_canonical_path(OBJECT(s)),
              time, delta, delta_ticks);
-    ptimer_set_count(e->ptimer, delta_ticks);
-    ptimer_run(e->ptimer, PTIMER_MODE_ONE_SHOT);
+    assert(he->ptimer);
+    ptimer_set_count(he->ptimer, delta_ticks);
+    ptimer_run(he->ptimer, PTIMER_MODE_ONE_SHOT);
+}
+
+static void hpsc_elapsed_timer_event_cancel(ARMSystemCounterEvent *asc_e)
+{
+    HPSCElapsedTimerEvent *e = HPSC_ELAPSED_TIMER_EVENT(asc_e);
+    DB_PRINT("%s: slave event cancel\n",
+             object_get_canonical_path(OBJECT(asc_e->sc)));
+    assert(e->ptimer);
+    ptimer_stop(e->ptimer);
 }
 
 static const MemoryRegionOps hpsc_elapsed_ops = {
@@ -517,6 +546,8 @@ static void hpsc_elapsed_realize(DeviceState *dev, Error **errp)
     s->max_count = (1ULL << (64 - log2_of_pow2(s->max_tickdiv) - 1)) - 1;
     DB_PRINT("%s: init: max_tickdiv %x max_count %lx\n",
              object_get_canonical_path(OBJECT(s)), s->max_tickdiv, s->max_count);
+
+    s->max_delta = s->nominal_freq_hz / s->clk_freq_hz;
 
     for (i = 0; i < ARRAY_SIZE(hpsc_elapsed_regs_info); ++i) {
         DepRegisterInfo *r =
@@ -544,7 +575,7 @@ static void hpsc_elapsed_realize(DeviceState *dev, Error **errp)
     QLIST_INIT(&s->slave_events);
 }
 
-static void hpsc_elapsed_init(Object *obj)
+static void hpsc_elapsed_timer_init(Object *obj)
 {
     HPSCElapsedTimer *s = HPSC_ELAPSED_TIMER(obj);
     SysBusDevice *sbd = SYS_BUS_DEVICE(obj);
@@ -577,24 +608,38 @@ static Property hpsc_elapsed_props[] = {
 static void hpsc_elapsed_class_init(ObjectClass *klass, void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
+    ARMSystemCounterClass *sc = ARM_SYSTEM_COUNTER_CLASS(klass);
 
     dc->reset = hpsc_elapsed_reset;
     dc->realize = hpsc_elapsed_realize;
     dc->vmsd = &vmstate_hpsc_elapsed;
     dc->props = hpsc_elapsed_props;
+
+    sc->max_count = hpsc_elapsed_timer_max_count;
+    sc->max_delta = hpsc_elapsed_timer_max_delta;
+    sc->count = hpsc_elapsed_timer_count;
+    sc->event_create = hpsc_elapsed_timer_event_create;
+    sc->event_destroy = hpsc_elapsed_timer_event_destroy;
+    sc->event_schedule = hpsc_elapsed_timer_event_schedule;
+    sc->event_cancel = hpsc_elapsed_timer_event_cancel;
 }
 
-static const TypeInfo hpsc_elapsed_info = {
-    .name          = TYPE_HPSC_ELAPSED_TIMER,
-    .parent        = TYPE_SYS_BUS_DEVICE,
-    .instance_size = sizeof(HPSCElapsedTimer),
-    .class_init    = hpsc_elapsed_class_init,
-    .instance_init = hpsc_elapsed_init,
+static const TypeInfo hpsc_elapsed_info[] = {
+    {
+        .name          = TYPE_HPSC_ELAPSED_TIMER,
+        .parent        = TYPE_SYS_BUS_DEVICE,
+        .instance_size = sizeof(HPSCElapsedTimer),
+        .class_init    = hpsc_elapsed_class_init,
+        .instance_init = hpsc_elapsed_timer_init,
+        .interfaces = (InterfaceInfo []) {
+            {TYPE_ARM_SYSTEM_COUNTER},
+        },
+    },
+    {
+        .name          = TYPE_HPSC_ELAPSED_TIMER_EVENT,
+        .parent        = TYPE_ARM_SYSTEM_COUNTER_EVENT,
+        .instance_size = sizeof(HPSCElapsedTimerEvent),
+    },
 };
 
-static void hpsc_elapsed_register_types(void)
-{
-    type_register_static(&hpsc_elapsed_info);
-}
-
-type_init(hpsc_elapsed_register_types)
+DEFINE_TYPES(hpsc_elapsed_info)
