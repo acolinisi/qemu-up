@@ -130,7 +130,10 @@ typedef struct HPSCElapsedTimer {
 static uint64_t get_count(HPSCElapsedTimer *s)
 {
     uint64_t count_ns = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
-    return (count_ns - count_ns % s->delta) + s->offset;
+    uint64_t count = (count_ns - count_ns % s->delta) + s->offset;
+    DB_PRINT("%s: count -> %lx (offset -> %lx)\n",
+            object_get_canonical_path(OBJECT(s)), count, s->offset);
+    return count;
 }
 
 static void set_count(HPSCElapsedTimer *s, uint64_t count)
