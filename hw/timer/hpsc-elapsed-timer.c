@@ -115,7 +115,7 @@ typedef struct HPSCElapsedTimer {
     uint64_t max_count;
     unsigned max_delta;
     unsigned delta;
-    uint64_t offset; /* implements setting the counter */
+    int64_t offset; /* implements setting the counter */
 
     QLIST_HEAD(se_list_head, HPSCElapsedTimerEvent) slave_events;
     HPSCElapsedTimerEvent event; /* note: also in slave_events list */
@@ -131,8 +131,8 @@ static uint64_t get_count(HPSCElapsedTimer *s)
 {
     uint64_t count_ns = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
     uint64_t count = (count_ns - count_ns % s->delta) + s->offset;
-    DB_PRINT("%s: count -> %lx (offset -> %lx)\n",
-            object_get_canonical_path(OBJECT(s)), count, s->offset);
+    DB_PRINT("%s: count -> %lx offset -> %lx (%ld)\n",
+            object_get_canonical_path(OBJECT(s)), count, s->offset, s->offset);
     return count;
 }
 
@@ -141,8 +141,8 @@ static void set_count(HPSCElapsedTimer *s, uint64_t count)
     /* Note, here we need the truncated count but without the offset. */
     uint64_t cur_count_ns = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
     s->offset = count - (cur_count_ns - cur_count_ns % s->delta);
-    DB_PRINT("%s: count <- %lx (offset <- %lx)\n",
-            object_get_canonical_path(OBJECT(s)), count, s->offset);
+    DB_PRINT("%s: count <- %lx offset <- %lx (%ld)\n",
+            object_get_canonical_path(OBJECT(s)), count, s->offset, s->offset);
 }
 
 static void update_freq(HPSCElapsedTimer *s)
