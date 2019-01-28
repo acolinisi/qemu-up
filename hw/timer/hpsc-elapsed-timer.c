@@ -556,7 +556,8 @@ static void hpsc_elapsed_realize(DeviceState *dev, Error **errp)
     s->delta = s->max_delta;
     s->max_count = INT64_MAX / s->max_delta;
 
-    DB_PRINT("%s: init: max_tickdiv %x max_count %lx max_delta %u\n",
+    qemu_log(TYPE_HPSC_ELAPSED_TIMER
+             "%s: init: max_tickdiv %u max_count 0x%lx max_delta %u\n",
              object_get_canonical_path(OBJECT(s)),
              s->max_tickdiv, s->max_count, s->max_delta);
 
