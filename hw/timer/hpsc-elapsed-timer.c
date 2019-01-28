@@ -138,7 +138,9 @@ static uint64_t get_count(HPSCElapsedTimer *s)
 
 static void set_count(HPSCElapsedTimer *s, uint64_t count)
 {
-    s->offset = count - get_count(s);
+    /* Note, here we need the truncated count but without the offset. */
+    uint64_t cur_count_ns = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
+    s->offset = count - (cur_count_ns - cur_count_ns % s->delta);
     DB_PRINT("%s: count <- %lx (offset <- %lx)\n",
             object_get_canonical_path(OBJECT(s)), count, s->offset);
 }
@@ -218,7 +220,12 @@ static void event_schedule(HPSCElapsedTimerEvent *he, HPSCElapsedTimer *s, uint6
     he->scheduled = true;
     /* Scale the time given (in units exported by this timer interface, i.e.
      * ns) by delta, because this internal event backend timer is scaled. */
-    timer_mod(&he->qtimer, time / s->delta);
+    uint64_t event_time = (time - s->offset) / s->delta;
+    DB_PRINT("%s: event sched: time %lx offset %ld "
+             "(time - offset) %lx event_time %lx\n",
+             object_get_canonical_path(OBJECT(s)), time, s->offset,
+             time - s->offset, event_time);
+    timer_mod(&he->qtimer, event_time);
 }
 
 static void event_cancel(HPSCElapsedTimerEvent *he)
