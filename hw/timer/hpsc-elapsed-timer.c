@@ -6,7 +6,6 @@
 #include "qemu/log.h"
 #include "qemu/timer.h"
 #include "qemu/main-loop.h"
-#include "hw/ptimer.h"
 #include "hw/fdt_generic_util.h"
 #include "hw/arm/arm-system-counter.h"
 
@@ -34,7 +33,12 @@
 /* This timer's counter register is in fixed units, regardless of
  * the clock frequency, which means that on each clock cycle the
  * timer may increment by a delta of more than 1. This macro
- * specifies the fixed units. */
+ * specifies the fixed units.
+ *
+ * NOTE: This macro is not a configurable parameter, it is a fixed
+ * characteristic of the backend used to implement this System Counter model.
+ * To change the tick rate of this System Counter (and thus ARM Generic
+ * Timers) change the clk-freq-hz object property, not this macro. */
 #define NOMINAL_FREQ_HZ 1000000000 /* 1 GHz for fixed units of ns */
 
 // TODO: is there support for 64-bit registers? to avoid HI,LO
@@ -96,8 +100,8 @@ typedef struct HPSCElapsedTimerEvent {
 
     QLIST_ENTRY(HPSCElapsedTimerEvent) list_entry;
 
-    ptimer_state *ptimer;
-    QEMUBH *bh;
+    QEMUTimer qtimer;
+    bool scheduled;
 } HPSCElapsedTimerEvent;
 
 
@@ -105,26 +109,16 @@ typedef struct HPSCElapsedTimer {
     SysBusDevice parent_obj;
     MemoryRegion iomem;
 
-    // const props from DT
     uint32_t clk_freq_hz;
+    uint32_t freq_hz; /* after divider applied */
     uint32_t max_tickdiv;
     uint64_t max_count;
     unsigned max_delta;
-
-    uint32_t freq_hz; // after divider applied
-
-    // Main timer
-    ptimer_state *ptimer;
-    QEMUBH *bh;
-
-    // Timer used to schedule the event interrupt
-    ptimer_state *ptimer_event;
-    QEMUBH *bh_event;
+    unsigned delta;
+    uint64_t offset; /* implements setting the counter */
 
     QLIST_HEAD(se_list_head, HPSCElapsedTimerEvent) slave_events;
-
-    uint64_t limit;
-    unsigned tick_delta;
+    HPSCElapsedTimerEvent event; /* note: also in slave_events list */
     
     qemu_irq irq;
 
@@ -133,60 +127,58 @@ typedef struct HPSCElapsedTimer {
 } HPSCElapsedTimer;
 
 
-// Convert from units of time (given by the "nominal" frequency) to ptimer units
-static uint64_t time_to_ticks(HPSCElapsedTimer *s, uint64_t time)
-{
-    return time / s->tick_delta;
-}
 static uint64_t get_count(HPSCElapsedTimer *s)
 {
-    uint64_t count = ptimer_get_count(s->ptimer);
-    DB_PRINT("%s: count -> %lx (face count %lx)\n",
-            object_get_canonical_path(OBJECT(s)),
-            count, (s->limit - count) * s->tick_delta);
-    return (s->limit - count) * s->tick_delta;
+    uint64_t count_ns = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
+    return (count_ns - count_ns % s->delta) + s->offset;
 }
 
 static void set_count(HPSCElapsedTimer *s, uint64_t count)
 {
-    DB_PRINT("%s: count <- %lx (face count %lx)\n",
-            object_get_canonical_path(OBJECT(s)),
-            s->limit - count / s->tick_delta, count);
-    ptimer_set_count(s->ptimer, s->limit - count / s->tick_delta);
+    s->offset = count - get_count(s);
+    DB_PRINT("%s: count <- %lx (offset <- %lx)\n",
+            object_get_canonical_path(OBJECT(s)), count, s->offset);
 }
 
-static void timer_update_freq(HPSCElapsedTimer *s)
+static void update_freq(HPSCElapsedTimer *s)
 {
     uint32_t tickdiv = extract32(s->regs[R_REG_CONFIG_LO],
             R_REG_CONFIG_LO_TICKDIV_SHIFT, R_REG_CONFIG_LO_TICKDIV_LENGTH) + 1;
+    unsigned cur_delta = s->delta;
+    uint64_t cur_remaining, remaining;
+
     s->freq_hz = s->clk_freq_hz / tickdiv;
-    s->tick_delta = NOMINAL_FREQ_HZ / s->freq_hz;
+    s->delta = NOMINAL_FREQ_HZ / s->freq_hz;
 
-    // since user-facing count is internal count * delta, we limit the max
-    // internal count so that that product does not overflow
-    s->limit = s->max_count / s->tick_delta;
+    DB_PRINT("%s: update freq <- %u (tickdiv %u tick delta %u)\n",
+            object_get_canonical_path(OBJECT(s)),
+            s->freq_hz, tickdiv, s->delta);
 
-    DB_PRINT("%s: update freq <- %u (tickdiv %u tick delta %u max count %lx)\n",
-            object_get_canonical_path(OBJECT(s)), s->freq_hz, tickdiv, s->tick_delta, s->limit);
-
-    ptimer_set_freq(s->ptimer, s->freq_hz);
-    ptimer_set_freq(s->ptimer_event, s->freq_hz);
+    /* If frequency didn't change, then events don't need scaling. */
+    if (s->delta == cur_delta)
+        return;
 
     HPSCElapsedTimerEvent *e;
     QLIST_FOREACH(e, &s->slave_events, list_entry) {
-        ptimer_set_freq(e->ptimer, s->freq_hz);
+        if (!e->scheduled)
+            continue;
+
+        /* The timer.h interface does not support changing the scale
+         * of a timer, so we scale the remaining time instead. */
+        cur_remaining = timer_expire_time(&e->qtimer);
+        remaining = s->delta > cur_delta ?
+                        cur_remaining * (s->delta / cur_delta) :
+                        cur_remaining / (cur_delta / s->delta);
+        DB_PRINT("%s: update freq: event timer mod: remaining %lu -> %lu\n",
+                 object_get_canonical_path(OBJECT(s)),
+                 cur_remaining, remaining);
+        timer_mod(&e->qtimer, remaining); /* scale remains unchanged */
     }
-
-    ptimer_set_limit(s->ptimer, s->limit, /* reload? */ 1);
-
-    // Since event is an absolute time, once it's hit, the next hit will be
-    // after a rollover and counting to to the same event value.
-    ptimer_set_limit(s->ptimer_event, s->limit, /* reload? */ 1);
 }
 
-static void timer_sync(HPSCElapsedTimer *s)
+static void synchronize(HPSCElapsedTimer *s)
 {
-    DB_PRINT("%s: sync\n",
+    DB_PRINT("%s: synchronize\n",
              object_get_canonical_path(OBJECT(s)));
 
     uint64_t count = get_count(s);
@@ -198,42 +190,66 @@ static void timer_sync(HPSCElapsedTimer *s)
     set_count(s, count);
 }
 
+static void event_init(HPSCElapsedTimerEvent *he, HPSCElapsedTimer *s,
+                       ARMSystemCounterEventCb *cb, void *arg)
+{
+    he->scheduled = false;
+    /* Timer is scaled by delta, because our maximum resolution is bounded by
+     * the clk freq (i.e. the delta). We don't have to scale it, though, could
+     * also keep it at same freq as QEMU_CLOCK_VIRTUAL. */
+    timer_init(&he->qtimer, QEMU_CLOCK_VIRTUAL, s->delta, cb, arg);
+    DB_PRINT("%s: event create: delta %u exp %lu\n",
+             object_get_canonical_path(OBJECT(s)), s->delta,
+             timer_expire_time(&he->qtimer));
+    QLIST_INSERT_HEAD(&s->slave_events, he, list_entry);
+}
+
+static void event_deinit(HPSCElapsedTimerEvent *he)
+{
+    QLIST_REMOVE(he, list_entry);
+    timer_deinit(&he->qtimer);
+}
+
+static void event_schedule(HPSCElapsedTimerEvent *he, HPSCElapsedTimer *s, uint64_t time)
+{
+    he->scheduled = true;
+    /* Scale the time given (in units exported by this timer interface, i.e.
+     * ns) by delta, because this internal event backend timer is scaled. */
+    timer_mod(&he->qtimer, time / s->delta);
+}
+
+static void event_cancel(HPSCElapsedTimerEvent *he)
+{
+    timer_del(&he->qtimer);
+    he->scheduled = false;
+}
+
 static void execute_cmd(HPSCElapsedTimer *s, cmd_t cmd)
 {
-    uint64_t count, event, remaining, remaining_ticks;
+    uint64_t count, event_time;
     switch (cmd) {
         case CMD_CAPTURE:
                 count = get_count(s);
-                s->regs[R_REG_CAPTURED_LO] = (uint32_t)(count & 0xffffffff);
-                s->regs[R_REG_CAPTURED_HI] = (uint32_t)(count >> 32);
                 DB_PRINT("%s: cmd: capture: count -> %lx\n",
                          object_get_canonical_path(OBJECT(s)), count);
+                s->regs[R_REG_CAPTURED_LO] = (uint32_t)(count & 0xffffffff);
+                s->regs[R_REG_CAPTURED_HI] = (uint32_t)(count >> 32);
                 break;
         case CMD_LOAD:
                 count = ((uint64_t)s->regs[R_REG_LOAD_HI] << 32) | s->regs[R_REG_LOAD_LO];
-                set_count(s, count);
                 DB_PRINT("%s: cmd: load: count <- %lx\n",
                          object_get_canonical_path(OBJECT(s)), count);
+                set_count(s, count);
                 break;
         case CMD_EVENT:
-                ptimer_stop(s->ptimer_event); // in case changing before the event
-
-                count = get_count(s);
-                event = ((uint64_t)s->regs[R_REG_EVENT_HI] << 32) | s->regs[R_REG_EVENT_LO];
-                if (event > count) { // future
-                    remaining = event - count;
-                } else { // in the past
-                    remaining = count + event;
-                }
-                remaining_ticks = time_to_ticks(s, remaining);
-                ptimer_set_limit(s->ptimer_event, remaining_ticks, /* reload? */ 1);
-                ptimer_run(s->ptimer_event, PTIMER_MODE_CONT);
-
-                DB_PRINT("%s: cmd: event timer count <- %lx ticks (%lx time)\n",
-                         object_get_canonical_path(OBJECT(s)), remaining_ticks, remaining);
+                event_time = ((uint64_t)s->regs[R_REG_EVENT_HI] << 32) |
+                             s->regs[R_REG_EVENT_LO];
+                DB_PRINT("%s: cmd: sched event @ %lx ticks\n",
+                         object_get_canonical_path(OBJECT(s)), event_time);
+                event_schedule(&s->event, s, event_time);
                 break;
         case CMD_SYNC:
-                timer_sync(s);
+                synchronize(s);
                 break;
         default:
                 assert(false && "unhandled cmd");
@@ -272,7 +288,7 @@ static void post_write_cmd_fire(DepRegisterInfo *reg, uint64_t val64)
 static void post_write_config_lo(DepRegisterInfo *reg, uint64_t val64)
 {
     HPSCElapsedTimer *s = HPSC_ELAPSED_TIMER(reg->opaque);
-    timer_update_freq(s); // TODO: is this update indeed a NOP if value unchanged?
+    update_freq(s); // TODO: is this update indeed a NOP if value unchanged?
 }
 
 static void post_write_status(DepRegisterInfo *reg, uint64_t val64)
@@ -282,7 +298,8 @@ static void post_write_status(DepRegisterInfo *reg, uint64_t val64)
 
     if (status & R_REG_STATUS_EVENT_MASK) {
         qemu_set_irq(s->irq, 0); // TODO: spec: how is interrupt cleared?
-        ptimer_stop(s->ptimer_event);
+        /* TODO: hw spec: should the event be left enabled, i.e. should it
+         * trigger after main timer counter rolls over? */
     }
 
     if (status & R_REG_STATUS_SYNC_MASK)
@@ -375,28 +392,6 @@ static DepRegisterAccessInfo hpsc_elapsed_regs_info[] = {
    }
 };
 
-static void hpsc_elapsed_reset(DeviceState *dev)
-{
-    HPSCElapsedTimer *s = HPSC_ELAPSED_TIMER(dev);
-    unsigned int i;
-
-    // TODO: Workaround for Qemu calling reset more than once (second time via busj
-    // reset). The true fix is to fix Qemu to reset only once.
-    ptimer_stop(s->ptimer);
-    ptimer_stop(s->ptimer_event);
-
-    for (i = 0; i < ARRAY_SIZE(s->regs_info); ++i)
-        dep_register_reset(&s->regs_info[i]);
-
-    timer_update_freq(s);
-
-    DB_PRINT("%s: reset: count <- %lx\n",
-            object_get_canonical_path(OBJECT(s)), s->limit);
-    ptimer_set_count(s->ptimer, s->limit);
-    ptimer_run(s->ptimer, PTIMER_MODE_CONT);
-    qemu_set_irq(s->irq, 0);
-}
-
 static uint64_t hpsc_elapsed_read(void *opaque, hwaddr addr, unsigned size)
 {
     HPSCElapsedTimer *s = HPSC_ELAPSED_TIMER(opaque);
@@ -447,15 +442,10 @@ static void hpsc_elapsed_access(MemoryTransaction *tr)
     }
 }
 
-static void main_timer_rollover(void *opaque)
+static void handle_event(void *opaque)
 {
-    // Nothing to do, but ptimer requires the bottom half (BH) callback
-}
-
-static void event_timer_rollover(void *opaque)
-{
-    HPSCElapsedTimer *s = opaque;
-    DB_PRINT("%s: event rollover\n", object_get_canonical_path(OBJECT(s)));
+    HPSCElapsedTimer *s = HPSC_ELAPSED_TIMER(opaque);
+    DB_PRINT("%s: event triggered\n", object_get_canonical_path(OBJECT(s)));
 
     s->regs[R_REG_STATUS] |= R_REG_STATUS_EVENT_MASK;
     qemu_set_irq(s->irq, 1);
@@ -488,9 +478,7 @@ static ARMSystemCounterEvent *hpsc_elapsed_timer_event_create(
         HPSC_ELAPSED_TIMER_EVENT(object_new(TYPE_HPSC_ELAPSED_TIMER_EVENT));
     ARMSystemCounterEvent *e = ARM_SYSTEM_COUNTER_EVENT(he);
     e->sc = asc;
-    he->bh = qemu_bh_new(cb, arg);
-    he->ptimer = ptimer_init(he->bh, PTIMER_POLICY_DEFAULT);
-    QLIST_INSERT_HEAD(&s->slave_events, he, list_entry);
+    event_init(he, s, cb, arg);
     return e;
 }
 
@@ -498,10 +486,7 @@ static void hpsc_elapsed_timer_event_destroy(ARMSystemCounterEvent *e)
 {
     HPSCElapsedTimerEvent *he = HPSC_ELAPSED_TIMER_EVENT(e);
     e->sc = NULL;
-    QLIST_REMOVE(he, list_entry);
-    ptimer_free(he->ptimer); // deletes bh
-    he->ptimer = NULL;
-    he->bh = NULL;
+    event_deinit(he);
     object_unref(OBJECT(he));
 }
 
@@ -510,33 +495,45 @@ static void hpsc_elapsed_timer_event_schedule(ARMSystemCounterEvent *e,
 {
     HPSCElapsedTimerEvent *he = HPSC_ELAPSED_TIMER_EVENT(e);
     HPSCElapsedTimer *s = HPSC_ELAPSED_TIMER(e->sc);
-    uint64_t delta = time - get_count(s);
-    uint64_t delta_ticks = time_to_ticks(s, delta);
-    DB_PRINT("%s: slave event sched @ %lx time (delta %lx time = %lx ticks)\n",
-             object_get_canonical_path(OBJECT(s)),
-             time, delta, delta_ticks);
-    assert(he->ptimer);
-    ptimer_set_count(he->ptimer, delta_ticks);
-    ptimer_run(he->ptimer, PTIMER_MODE_ONE_SHOT);
+    DB_PRINT("%s: slave event sched @ %lx\n",
+             object_get_canonical_path(OBJECT(s)), time);
+    event_schedule(he, s, time);
 }
 
 static void hpsc_elapsed_timer_event_cancel(ARMSystemCounterEvent *asc_e)
 {
-    HPSCElapsedTimerEvent *e = HPSC_ELAPSED_TIMER_EVENT(asc_e);
+    HPSCElapsedTimerEvent *he = HPSC_ELAPSED_TIMER_EVENT(asc_e);
     DB_PRINT("%s: slave event cancel\n",
              object_get_canonical_path(OBJECT(asc_e->sc)));
-    assert(e->ptimer);
-    ptimer_stop(e->ptimer);
+    event_cancel(he);
 }
 
-static const MemoryRegionOps hpsc_elapsed_ops = {
-    .access = hpsc_elapsed_access,
-    .endianness = DEVICE_LITTLE_ENDIAN,
-    .valid = {
-        .min_access_size = 4,
-        .max_access_size = 4,
-    },
-};
+static void hpsc_elapsed_reset(DeviceState *dev)
+{
+    HPSCElapsedTimer *s = HPSC_ELAPSED_TIMER(dev);
+    unsigned int i;
+
+    for (i = 0; i < ARRAY_SIZE(s->regs_info); ++i)
+        dep_register_reset(&s->regs_info[i]);
+
+    /* The event register was reset, so stop the interval event timer.
+     *
+     * TODO: hw spec: is the event always enabled? That is, in the abscence of
+     * CMD_EVENT, should the event should trigger for the first time when the
+     * timer rolls over? If yes, then we should schedule the event here, but
+     * the we can't schedule it for 0 because then it would trigger immediately,
+     * so we could schedule it for max_count, which would be off by one cycle.
+     */
+    event_cancel(&s->event);
+
+    /* To external slave events need the re-scaling due to frequency change,
+     * but they should be kept running, because the comparators are logically
+     * owned by the comsumer of our API, which may be in a different reset
+     * domain. */
+    update_freq(s);
+
+    qemu_set_irq(s->irq, 0);
+}
 
 static void hpsc_elapsed_realize(DeviceState *dev, Error **errp)
 {
@@ -544,15 +541,18 @@ static void hpsc_elapsed_realize(DeviceState *dev, Error **errp)
     const char *prefix = object_get_canonical_path(OBJECT(dev));
     unsigned int i;
 
-    // Note: there is a limitation from the Qemu timer.h/ptimer.h backend:
-    // period[ns] * count must not overflow a int64_t. Period is at most
-    // 1/(clk_freq_hz/max_tickdiv) * 10^9 ns (= 256, i.e. 8 bits), so count must be 8 bits
-    // smaller (and another -1 bit due to int64_t instead of uint64_t).
-    s->max_count = (1ULL << (64 - log2_of_pow2(s->max_tickdiv) - 1)) - 1;
-    DB_PRINT("%s: init: max_tickdiv %x max_count %lx\n",
-             object_get_canonical_path(OBJECT(s)), s->max_tickdiv, s->max_count);
-
+    // There range of the Qemu timer.h backend is a signed 64-bit integer.
     s->max_delta = NOMINAL_FREQ_HZ / s->clk_freq_hz;
+    s->delta = s->max_delta;
+    s->max_count = INT64_MAX / s->max_delta;
+
+    DB_PRINT("%s: init: max_tickdiv %x max_count %lx max_delta %u\n",
+             object_get_canonical_path(OBJECT(s)),
+             s->max_tickdiv, s->max_count, s->max_delta);
+
+    event_init(&s->event, s, handle_event, s);
+
+    QLIST_INIT(&s->slave_events);
 
     for (i = 0; i < ARRAY_SIZE(hpsc_elapsed_regs_info); ++i) {
         DepRegisterInfo *r =
@@ -570,15 +570,16 @@ static void hpsc_elapsed_realize(DeviceState *dev, Error **errp)
         dep_register_init(r);
         qdev_pass_all_gpios(DEVICE(r), dev);
     }
-
-    s->bh = qemu_bh_new(main_timer_rollover, s);
-    s->ptimer = ptimer_init(s->bh, PTIMER_POLICY_DEFAULT);
-
-    s->bh_event = qemu_bh_new(event_timer_rollover, s);
-    s->ptimer_event = ptimer_init(s->bh_event, PTIMER_POLICY_DEFAULT);
-
-    QLIST_INIT(&s->slave_events);
 }
+
+static const MemoryRegionOps hpsc_elapsed_ops = {
+    .access = hpsc_elapsed_access,
+    .endianness = DEVICE_LITTLE_ENDIAN,
+    .valid = {
+        .min_access_size = 4,
+        .max_access_size = 4,
+    },
+};
 
 static void hpsc_elapsed_timer_init(Object *obj)
 {
