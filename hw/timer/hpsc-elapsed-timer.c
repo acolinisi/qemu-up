@@ -527,6 +527,8 @@ static void hpsc_elapsed_reset(DeviceState *dev)
     for (i = 0; i < ARRAY_SIZE(s->regs_info); ++i)
         dep_register_reset(&s->regs_info[i]);
 
+    s->offset = 0;
+
     /* The event register was reset, so stop the interval event timer.
      *
      * TODO: hw spec: is the event always enabled? That is, in the abscence of
