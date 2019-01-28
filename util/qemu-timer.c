@@ -698,6 +698,12 @@ uint64_t timer_expire_time_ns(QEMUTimer *ts)
     return timer_pending(ts) ? ts->expire_time : -1;
 }
 
+uint64_t timer_expire_time(QEMUTimer *ts)
+{
+    return timer_pending(ts) ? ts->expire_time / ts->scale: -1;
+}
+
+
 bool qemu_clock_run_all_timers(void)
 {
     bool progress = false;

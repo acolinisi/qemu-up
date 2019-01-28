@@ -754,6 +754,16 @@ bool timer_expired(QEMUTimer *timer_head, int64_t current_time);
 uint64_t timer_expire_time_ns(QEMUTimer *ts);
 
 /**
+ * timer_expire_time:
+ * @ts: the timer
+ *
+ * Determine the expiry time of a timer in timer's units
+ *
+ * Returns: the expiry time in units associated with the timer
+ */
+uint64_t timer_expire_time(QEMUTimer *ts);
+
+/**
  * timer_get:
  * @f: the file
  * @ts: the timer
