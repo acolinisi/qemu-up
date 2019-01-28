@@ -88,8 +88,9 @@ static void schedule_event(HPSCRTITimer *s)
 
     s->start_count = get_count(s);
     event_time = s->start_count + s->interval;
-    DB_PRINT("%s: sched event @ %lx\n",
-            object_get_canonical_path(OBJECT(s)), event_time);
+    DB_PRINT("%s: sched event @ count %lu + interval %lu = %lx\n",
+            object_get_canonical_path(OBJECT(s)),
+            s->start_count, s->interval, event_time);
     ascc->event_schedule(s->sys_counter_event, event_time);
 }
 
