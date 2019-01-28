@@ -102,6 +102,8 @@ typedef struct HPSCElapsedTimerEvent {
 
     QEMUTimer qtimer;
     bool scheduled;
+    ARMSystemCounterEventCb *cb;
+    void *arg;
 } HPSCElapsedTimerEvent;
 
 
@@ -155,29 +157,32 @@ static void update_freq(HPSCElapsedTimer *s)
     s->freq_hz = s->clk_freq_hz / tickdiv;
     s->delta = NOMINAL_FREQ_HZ / s->freq_hz;
 
-    DB_PRINT("%s: update freq <- %u (tickdiv %u tick delta %u)\n",
+    DB_PRINT("%s: update freq <- %u (tickdiv <- %u tick delta (%u) <- %u\n",
             object_get_canonical_path(OBJECT(s)),
-            s->freq_hz, tickdiv, s->delta);
+            s->freq_hz, tickdiv, cur_delta, s->delta);
 
     /* If frequency didn't change, then events don't need scaling. */
     if (s->delta == cur_delta)
         return;
 
-    HPSCElapsedTimerEvent *e;
-    QLIST_FOREACH(e, &s->slave_events, list_entry) {
-        if (!e->scheduled)
-            continue;
+    HPSCElapsedTimerEvent *he;
+    QLIST_FOREACH(he, &s->slave_events, list_entry) {
+        if (he->scheduled) {
+            /* The timer.h interface does not support changing the scale
+             * of a timer, so we reinit and re-scale the remaining time. */
+            cur_remaining = timer_expire_time(&he->qtimer) * cur_delta;
+            remaining = cur_remaining / s->delta;
+            DB_PRINT("%s: update freq: event: mod: remaining %lu -> %lu\n",
+                     object_get_canonical_path(OBJECT(s)),
+                     cur_remaining, remaining);
+            timer_del(&he->qtimer);
+        }
 
-        /* The timer.h interface does not support changing the scale
-         * of a timer, so we scale the remaining time instead. */
-        cur_remaining = timer_expire_time(&e->qtimer);
-        remaining = s->delta > cur_delta ?
-                        cur_remaining * (s->delta / cur_delta) :
-                        cur_remaining / (cur_delta / s->delta);
-        DB_PRINT("%s: update freq: event timer mod: remaining %lu -> %lu\n",
-                 object_get_canonical_path(OBJECT(s)),
-                 cur_remaining, remaining);
-        timer_mod(&e->qtimer, remaining); /* scale remains unchanged */
+        timer_init(&he->qtimer, QEMU_CLOCK_VIRTUAL, s->delta, he->cb, he->arg);
+
+        if (he->scheduled) {
+            timer_mod(&he->qtimer, remaining);
+        }
     }
 }
 
@@ -200,6 +205,8 @@ static void event_init(HPSCElapsedTimerEvent *he, HPSCElapsedTimer *s,
                        ARMSystemCounterEventCb *cb, void *arg)
 {
     he->scheduled = false;
+    he->cb = cb;
+    he->arg = arg;
     /* Timer is scaled by delta, because our maximum resolution is bounded by
      * the clk freq (i.e. the delta). We don't have to scale it, though, could
      * also keep it at same freq as QEMU_CLOCK_VIRTUAL. */
