@@ -191,6 +191,7 @@ static void synchronize(HPSCElapsedTimer *s)
     s->regs[R_REG_SYNC_LO] = (uint32_t)count;
 
     uint32_t sync_interval = s->regs[R_REG_SYNC_INTERVAL];
+    assert(sync_interval > 0); // TODO: hw spec: default?
     count = (count / sync_interval + 1) * sync_interval;
     set_count(s, count);
 }
