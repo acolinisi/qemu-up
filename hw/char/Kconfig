@@ -24,6 +24,10 @@ config SERIAL_PCI
     depends on PCI
     select SERIAL
 
+config SERIAL_SYSBUS
+    bool
+    select SERIAL
+
 config VIRTIO_SERIAL
     bool
     default y
