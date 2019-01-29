@@ -81,6 +81,7 @@ typedef struct SerialState {
 
 extern const VMStateDescription vmstate_serial;
 extern const MemoryRegionOps serial_io_ops;
+extern const MemoryRegionOps serial_mm_ops[];
 
 void serial_realize_core(SerialState *s, Error **errp);
 void serial_exit_core(SerialState *s);
