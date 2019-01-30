@@ -44,7 +44,6 @@ static void serial_sysbus_init(Object *obj)
 {
     SerialSysBusState *s = SERIAL_SYSBUS(obj);
     SerialState *sdev = &s->sdev;
-    enum device_endian end = DEVICE_NATIVE_ENDIAN;
 
     sysbus_init_irq(SYS_BUS_DEVICE(s), &s->irq);
 
