@@ -153,6 +153,7 @@ static void update_freq(HPSCElapsedTimer *s)
             R_REG_CONFIG_LO_TICKDIV_SHIFT, R_REG_CONFIG_LO_TICKDIV_LENGTH) + 1;
     unsigned cur_delta = s->delta;
     uint64_t cur_remaining, remaining;
+    bool scheduled;
 
     s->freq_hz = s->clk_freq_hz / tickdiv;
     s->delta = NOMINAL_FREQ_HZ / s->freq_hz;
@@ -167,7 +168,8 @@ static void update_freq(HPSCElapsedTimer *s)
 
     HPSCElapsedTimerEvent *he;
     QLIST_FOREACH(he, &s->slave_events, list_entry) {
-        if (he->scheduled) {
+        scheduled = he->scheduled;
+        if (scheduled) {
             /* The timer.h interface does not support changing the scale
              * of a timer, so we reinit and re-scale the remaining time. */
             cur_remaining = timer_expire_time(&he->qtimer) * cur_delta;
@@ -180,7 +182,7 @@ static void update_freq(HPSCElapsedTimer *s)
 
         timer_init(&he->qtimer, QEMU_CLOCK_VIRTUAL, s->delta, he->cb, he->arg);
 
-        if (he->scheduled) {
+        if (scheduled) {
             timer_mod(&he->qtimer, remaining);
         }
     }
