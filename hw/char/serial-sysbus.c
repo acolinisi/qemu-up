@@ -20,7 +20,6 @@ typedef struct {
     SysBusDevice busdev;
     SerialState sdev;
     unsigned baudrate;
-    qemu_irq irq;
 } SerialSysBusState;
 
 static const VMStateDescription vmstate_serial_sysbus = {
@@ -45,7 +44,7 @@ static void serial_sysbus_init(Object *obj)
     SerialSysBusState *s = SERIAL_SYSBUS(obj);
     SerialState *sdev = &s->sdev;
 
-    sysbus_init_irq(SYS_BUS_DEVICE(s), &s->irq);
+    sysbus_init_irq(SYS_BUS_DEVICE(s), &s->sdev.irq);
 
     memory_region_init_io(&sdev->io, NULL, &serial_mm_ops[DEVICE_NATIVE_ENDIAN],
                           sdev, "sysbus-serial", REGION_SIZE);
