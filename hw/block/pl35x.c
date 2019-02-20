@@ -41,6 +41,12 @@
 #define ECC_BYTES_PER_SUBPAGE 3
 #define ECC_CODEWORD_SIZE 512
 
+#define PL35x_REG_PERIPH_ID         0xFE0
+
+static const uint32_t pl35x_id[] = {
+    0x53, 0x13, 0x64, 0x00, 0x0D, 0xF0, 0x05, 0xB1 /* SMC-353 r2p2 */
+};
+
 #ifdef PL35X_ERR_DEBUG
 #define DB_PRINT(...) do { \
     fprintf(stderr,  ": %s: ", __func__); \
@@ -175,6 +181,11 @@ static uint64_t pl35x_read(void *opaque, hwaddr addr,
 {
     PL35xState *s = opaque;
     uint32_t r = 0;
+
+    if (addr >= PL35x_REG_PERIPH_ID && addr < PL35x_REG_PERIPH_ID + 32) {
+        return pl35x_id[(addr - PL35x_REG_PERIPH_ID) >> 2];
+    }
+
     switch (addr) {
     case 0x0:
       {
