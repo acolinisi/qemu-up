@@ -24,6 +24,7 @@
 #include "qemu/osdep.h"
 #include "qemu/units.h"
 #include "hw/hw.h"
+#include "sysemu/blockdev.h"
 #include "sysemu/block-backend.h"
 #include "hw/ssi/ssi.h"
 #include "qemu/bitops.h"
@@ -457,7 +458,7 @@ typedef struct Flash {
     int64_t dirty_page;
 
     const FlashPartInfo *pi;
-
+    uint16_t device_index;
 } Flash;
 
 typedef struct M25P80Class {
@@ -1264,6 +1265,10 @@ static void m25p80_realize(SSISlave *ss, Error **errp)
     Flash *s = M25P80(ss);
     M25P80Class *mc = M25P80_GET_CLASS(s);
     int ret;
+    DriveInfo *dinfo = drive_get_by_index(IF_MTD, s->device_index);
+
+    if (dinfo)
+        s->blk = blk_by_legacy_dinfo(dinfo);
 
     s->pi = mc->pi;
 
@@ -1314,6 +1319,7 @@ static Property m25p80_properties[] = {
     DEFINE_PROP_UINT8("spansion-cr3nv", Flash, spansion_cr3nv, 0x2),
     DEFINE_PROP_UINT8("spansion-cr4nv", Flash, spansion_cr4nv, 0x10),
     DEFINE_PROP_DRIVE("drive", Flash, blk),
+    DEFINE_PROP_UINT16("device-index", Flash, device_index, 0x10),
     DEFINE_PROP_END_OF_LIST(),
 };
 
