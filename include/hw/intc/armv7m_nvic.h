@@ -84,6 +84,7 @@ typedef struct NVICState {
     MemoryRegion container;
 
     uint32_t num_irq;
+    uint32_t cpu_id;
     qemu_irq excpout;
     qemu_irq sysresetreq;
 

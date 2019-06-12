@@ -22,6 +22,7 @@
 #include "exec/exec-all.h"
 #include "qemu/log.h"
 #include "trace.h"
+#include "hw/fdt_generic_util.h"
 
 /* IRQ number counting:
  *
@@ -2186,6 +2187,7 @@ static const VMStateDescription vmstate_nvic = {
 static Property props_nvic[] = {
     /* Number of external IRQ lines (so excluding the 16 internal exceptions) */
     DEFINE_PROP_UINT32("num-irq", NVICState, num_irq, 64),
+    DEFINE_PROP_UINT32("cpu-id", NVICState, cpu_id, 0),
     DEFINE_PROP_END_OF_LIST()
 };
 
@@ -2268,11 +2270,26 @@ static void nvic_systick_trigger(void *opaque, int n, int level)
     }
 }
 
+static int arm_nvic_fdt_get_irq(FDTGenericIntc *obj, qemu_irq *irqs,
+                                      uint32_t *cells, int ncells, int max,
+                                      Error **errp)
+{
+    /* if interrupt-cells = 1, use cells[0],
+          interrupt-cells = 3, use cells[1] */
+    (*irqs) = qdev_get_gpio_in(DEVICE(obj), cells[1]);
+    return 1;
+}
+
 static void armv7m_nvic_realize(DeviceState *dev, Error **errp)
 {
     NVICState *s = NVIC(dev);
+    SysBusDevice *sbd = SYS_BUS_DEVICE(dev);
     Error *err = NULL;
     int regionlen;
+
+    /* When defining machine with device tree, CPU pointer is not initialized */
+    s->cpu = ARM_CPU(qemu_get_cpu(s->cpu_id));
+    s->cpu->env.nvic = s;
 
     /* The armv7m container object will have set our CPU pointer */
     if (!s->cpu || !arm_feature(&s->cpu->env, ARM_FEATURE_M)) {
@@ -2284,6 +2301,8 @@ static void armv7m_nvic_realize(DeviceState *dev, Error **errp)
         error_setg(errp, "num-irq %d exceeds NVIC maximum", s->num_irq);
         return;
     }
+
+    sysbus_connect_irq(sbd, 0, qdev_get_gpio_in(DEVICE(s->cpu), ARM_CPU_IRQ));
 
     qdev_init_gpio_in(dev, set_irq_level, s->num_irq);
 
@@ -2410,6 +2429,10 @@ static void armv7m_nvic_class_init(ObjectClass *klass, void *data)
     dc->props = props_nvic;
     dc->reset = armv7m_nvic_reset;
     dc->realize = armv7m_nvic_realize;
+
+    FDTGenericIntcClass *fgic = FDT_GENERIC_INTC_CLASS(klass);
+    fgic->get_irq = arm_nvic_fdt_get_irq;
+    fgic->auto_parent = NULL;
 }
 
 static const TypeInfo armv7m_nvic_info = {
@@ -2419,6 +2442,12 @@ static const TypeInfo armv7m_nvic_info = {
     .instance_size = sizeof(NVICState),
     .class_init    = armv7m_nvic_class_init,
     .class_size    = sizeof(SysBusDeviceClass),
+    .interfaces = (InterfaceInfo[]) {
+        { TYPE_FDT_GENERIC_INTC },
+        { TYPE_FDT_GENERIC_GPIO },
+        { }
+    },
+    .abstract = false,
 };
 
 static void armv7m_nvic_register_types(void)
