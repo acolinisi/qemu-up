@@ -925,10 +925,12 @@ static void arm_cpu_realizefn(DeviceState *dev, Error **errp)
      * error and will result in segfaults if not caught here.
      */
     if (arm_feature(env, ARM_FEATURE_M)) {
+#if 0 /* When defining machine with device tree, NVIC node not yet created */
         if (!env->nvic) {
             error_setg(errp, "This board cannot be used with Cortex-M CPUs");
             return;
         }
+#endif
     } else {
         if (env->nvic) {
             error_setg(errp, "This board can only be used with Cortex-M CPUs");
