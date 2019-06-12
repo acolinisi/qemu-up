@@ -283,6 +283,11 @@ static bool cpu_common_has_work(CPUState *cs)
     return false;
 }
 
+static void cpu_device_reset(DeviceState *dev)
+{
+    cpu_reset(CPU(dev));
+}
+
 ObjectClass *cpu_class_by_name(const char *typename, const char *cpu_model)
 {
     CPUClass *cc = CPU_CLASS(object_class_by_name(typename));
@@ -431,6 +436,7 @@ static void cpu_class_init(ObjectClass *klass, void *data)
     k->cpu_exec_interrupt = cpu_common_exec_interrupt;
     k->adjust_watchpoint_address = cpu_adjust_watchpoint_address;
     set_bit(DEVICE_CATEGORY_CPU, dc->categories);
+    dc->reset = cpu_device_reset;
     dc->realize = cpu_common_realizefn;
     dc->unrealize = cpu_common_unrealizefn;
     dc->props = cpu_common_props;
