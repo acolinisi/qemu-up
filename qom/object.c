@@ -592,6 +592,7 @@ void object_unparent(Object *obj)
     if (obj->parent) {
         object_property_del_child(obj->parent, obj, NULL);
     }
+    obj->parent = NULL;
 }
 
 static void object_deinit(Object *obj, TypeImpl *type)
@@ -637,7 +638,7 @@ Object *object_new(const char *typename)
 {
     TypeImpl *ti = type_get_by_name(typename);
 
-    return object_new_with_type(ti);
+    return ti ? object_new_with_type(ti) : NULL;
 }
 
 
@@ -1174,6 +1175,29 @@ ObjectProperty *object_property_find(Object *obj, const char *name,
     return NULL;
 }
 
+static ObjectProperty *object_property_find_traverse(Object **obj,
+                                                     const char **name,
+                                                     Error **errp)
+{
+    const char *slash = strchr(*name, '/');
+
+    if (slash) {
+        Error *err = NULL;
+        char *child_name = g_strndup(*name, slash - *name);
+        *obj = object_property_get_link(*obj, child_name, &err);
+        g_free(child_name);
+        if (err) {
+            error_propagate(errp, err);
+        } else {
+            *name = slash + 1;
+            return object_property_find_traverse(obj, name, errp);
+        }
+        return NULL;
+    }
+
+    return object_property_find(*obj, *name, errp);
+}
+
 void object_property_iter_init(ObjectPropertyIterator *iter,
                                Object *obj)
 {
@@ -1240,7 +1264,7 @@ void object_property_del(Object *obj, const char *name, Error **errp)
 void object_property_get(Object *obj, Visitor *v, const char *name,
                          Error **errp)
 {
-    ObjectProperty *prop = object_property_find(obj, name, errp);
+    ObjectProperty *prop = object_property_find_traverse(&obj, &name, errp);
     if (prop == NULL) {
         return;
     }
@@ -1255,7 +1279,7 @@ void object_property_get(Object *obj, Visitor *v, const char *name,
 void object_property_set(Object *obj, Visitor *v, const char *name,
                          Error **errp)
 {
-    ObjectProperty *prop = object_property_find(obj, name, errp);
+    ObjectProperty *prop = object_property_find_traverse(&obj, &name, errp);
     if (prop == NULL) {
         return;
     }

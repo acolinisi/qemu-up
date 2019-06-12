@@ -3218,6 +3218,16 @@ Use @var{file} as a device tree binary (dtb) image and pass it to the kernel
 on boot.
 ETEXI
 
+DEF("hw-dtb", HAS_ARG, QEMU_OPTION_hw_dtb, \
+    "-hw-dtb file    use 'file' as device tree image\n", QEMU_ARCH_ALL)
+STEXI
+@item -hw-dtb @var{file}
+@findex -hw-dtb
+Use @var{file} as a device tree binary (dtb) image used to create the
+emulated machine. This dtb will not be passed to the kernel, use -dtb
+for that.
+ETEXI
+
 STEXI
 @end table
 ETEXI

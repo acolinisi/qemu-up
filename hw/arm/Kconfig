@@ -122,3 +122,6 @@ config ARMSSE_MHU
 
 config MUSCA
     bool
+
+config FDT_GENERIC
+    bool

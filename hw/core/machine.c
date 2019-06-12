@@ -291,6 +291,20 @@ static void machine_set_dtb(Object *obj, const char *value, Error **errp)
     ms->dtb = g_strdup(value);
 }
 
+static char *machine_get_hw_dtb(Object *obj, Error **errp)
+{
+    MachineState *ms = MACHINE(obj);
+
+    return g_strdup(ms->hw_dtb);
+}
+
+static void machine_set_hw_dtb(Object *obj, const char *value, Error **errp)
+{
+    MachineState *ms = MACHINE(obj);
+
+    ms->hw_dtb = g_strdup(value);
+}
+
 static char *machine_get_dumpdtb(Object *obj, Error **errp)
 {
     MachineState *ms = MACHINE(obj);
@@ -745,6 +759,11 @@ static void machine_class_init(ObjectClass *oc, void *data)
         machine_get_dumpdtb, machine_set_dumpdtb, &error_abort);
     object_class_property_set_description(oc, "dumpdtb",
         "Dump current dtb to a file and quit", &error_abort);
+
+    object_class_property_add_str(oc, "hw-dtb",
+        machine_get_hw_dtb, machine_set_hw_dtb, NULL);
+    object_class_property_set_description(oc, "hw-dtb",
+        "Dump current dtb to a file and quit", NULL);
 
     object_class_property_add(oc, "phandle-start", "int",
         machine_get_phandle_start, machine_set_phandle_start,

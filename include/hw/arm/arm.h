@@ -50,6 +50,10 @@ struct arm_boot_info {
      * (default: False)
      */
     bool skip_dtb_autoload;
+
+    void *fdt;
+    int fdt_size;
+
     /* multicore boards that use the default secondary core boot functions
      * need to put the address of the secondary boot code, the boot reg,
      * and the GIC address in the next 3 values, respectively. boards that

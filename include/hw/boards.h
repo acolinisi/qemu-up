@@ -248,6 +248,7 @@ struct MachineState {
     int kvm_shadow_mem;
     char *dtb;
     char *dumpdtb;
+    char *hw_dtb;
     int phandle_start;
     char *dt_compatible;
     bool dump_guest_core;
