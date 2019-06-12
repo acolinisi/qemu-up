@@ -32,6 +32,8 @@ typedef enum DeviceCategory {
 typedef void (*DeviceRealize)(DeviceState *dev, Error **errp);
 typedef void (*DeviceUnrealize)(DeviceState *dev, Error **errp);
 typedef void (*DeviceReset)(DeviceState *dev);
+typedef void (*DeviceHalt)(DeviceState *dev);
+typedef void (*DeviceUnhalt)(DeviceState *dev);
 typedef void (*BusRealize)(BusState *bus, Error **errp);
 typedef void (*BusUnrealize)(BusState *bus, Error **errp);
 
@@ -108,6 +110,8 @@ typedef struct DeviceClass {
 
     /* callbacks */
     DeviceReset reset;
+    DeviceHalt halt;
+    DeviceUnhalt unhalt;
     DeviceRealize realize;
     DeviceUnrealize unrealize;
 
@@ -414,6 +418,20 @@ void qdev_machine_init(void);
  * Reset a single device (by calling the reset method).
  */
 void device_reset(DeviceState *dev);
+
+/**
+ * @device_halt
+ *
+ * Halt a single device (by calling the halt method).
+ */
+void device_halt(DeviceState *dev);
+
+/**
+ * @device_unhalt
+ *
+ * Unhalt a single device (by calling the unhalt method).
+ */
+void device_unhalt(DeviceState *dev);
 
 void device_class_set_parent_reset(DeviceClass *dc,
                                    DeviceReset dev_reset,
