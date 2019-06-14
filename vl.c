@@ -139,6 +139,7 @@ int display_opengl;
 const char* keyboard_layout = NULL;
 ram_addr_t ram_size;
 const char *mem_path = NULL;
+const char *machine_path = NULL;
 int mem_prealloc = 0; /* force preallocation of physical target memory */
 bool enable_mlock = false;
 bool enable_cpu_pm = false;
@@ -3326,6 +3327,9 @@ int main(int argc, char **argv, char **envp)
                 break;
             case QEMU_OPTION_mem_prealloc:
                 mem_prealloc = 1;
+                break;
+            case QEMU_OPTION_machine_path:
+                machine_path = optarg;
                 break;
             case QEMU_OPTION_d:
                 log_mask = optarg;

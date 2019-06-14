@@ -33,7 +33,7 @@
 #define HPSC
 
 #ifndef ARM_GENERIC_FDT_DEBUG
-#define ARM_GENERIC_FDT_DEBUG 3
+#define ARM_GENERIC_FDT_DEBUG 0
 #endif
 #define DB_PRINT(lvl, ...) do { \
     if (ARM_GENERIC_FDT_DEBUG > (lvl)) { \

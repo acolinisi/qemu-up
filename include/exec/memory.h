@@ -27,6 +27,7 @@
 #include "qemu/rcu.h"
 #include "hw/qdev-core.h"
 
+extern const char *machine_path;
 #define RAM_ADDR_INVALID (~(ram_addr_t)0)
 
 #define MAX_PHYS_ADDR_SPACE_BITS 62
@@ -35,6 +36,10 @@
 #define TYPE_MEMORY_REGION "qemu:memory-region"
 #define MEMORY_REGION(obj) \
         OBJECT_CHECK(MemoryRegion, (obj), TYPE_MEMORY_REGION)
+
+#define TYPE_MEMORY_TRANSACTION_ATTR "qemu:memory-transaction-attr"
+#define MEMORY_TRANSACTION_ATTR(obj) \
+        OBJECT_CHECK(MemTxAttrs, (obj), TYPE_MEMORY_TRANSACTION_ATTR)
 
 #define TYPE_IOMMU_MEMORY_REGION "qemu:iommu-memory-region"
 #define IOMMU_MEMORY_REGION(obj) \
@@ -352,7 +357,7 @@ struct MemoryRegion {
 
     /* The following fields should fit in a cache line */
     bool romd_mode;
-    bool ram;
+    uint8_t ram;
     bool subpage;
     bool readonly; /* For RAM regions */
     bool nonvolatile;
@@ -1763,6 +1768,10 @@ MemTxResult memory_region_dispatch_write(MemoryRegion *mr,
  *        output.
  */
 void address_space_init(AddressSpace *as, MemoryRegion *root, const char *name);
+
+/* Remove this */
+AddressSpace *address_space_init_shareable(MemoryRegion *root,
+                                           const char *name);
 
 /**
  * address_space_destroy: destroy an address space
