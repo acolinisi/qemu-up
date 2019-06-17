@@ -354,6 +354,7 @@ static inline void qdev_init_gpio_in_named(DeviceState *dev,
     qdev_init_gpio_in_named_with_opaque(dev, handler, dev, name, n);
 }
 
+void qdev_pass_all_gpios(DeviceState *dev, DeviceState *container);
 void qdev_pass_gpios(DeviceState *dev, DeviceState *container,
                      const char *name);
 
