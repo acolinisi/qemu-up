@@ -3351,6 +3351,10 @@ static int disas_vfp_misc_insn(DisasContext *s, uint32_t insn)
 {
     uint32_t rd, rn, rm, dp = extract32(insn, 8, 1);
 
+    if (!(arm_dc_feature(s, ARM_FEATURE_V8) || arm_dc_feature(s, ARM_FEATURE_V8R))) {
+        return 1;
+    }
+
     if (dp) {
         VFP_DREG_D(rd, insn);
         VFP_DREG_N(rn, insn);
@@ -3557,7 +3561,8 @@ static int disas_vfp_insn(DisasContext *s, uint32_t insn)
                             }
                             break;
                         case ARM_VFP_MVFR2:
-                            if (!arm_dc_feature(s, ARM_FEATURE_V8)) {
+                            if (!(arm_dc_feature(s, ARM_FEATURE_V8) ||
+                                  arm_dc_feature(s, ARM_FEATURE_V8R))) {
                                 return 1;
                             }
                             /* fall through */
@@ -4501,8 +4506,10 @@ static bool msr_banked_access_decode(DisasContext *s, int r, int sysm, int rn,
     /* These instructions are present only in ARMv8, or in ARMv7 with the
      * Virtualization Extensions.
      */
-    if (!arm_dc_feature(s, ARM_FEATURE_V8) &&
-        !arm_dc_feature(s, ARM_FEATURE_EL2)) {
+    if ((!arm_dc_feature(s, ARM_FEATURE_V8) &&
+         !arm_dc_feature(s, ARM_FEATURE_EL2)) &&
+        (!arm_dc_feature(s, ARM_FEATURE_V8R) &&
+         !arm_dc_feature(s, ARM_FEATURE_EL2))) {
         goto undef;
     }
 
@@ -6626,7 +6633,8 @@ static int disas_neon_data_insn(DisasContext *s, uint32_t insn)
             break;
         case NEON_3R_FLOAT_MISC:
             /* VMAXNM/VMINNM in ARMv8 */
-            if (u && !arm_dc_feature(s, ARM_FEATURE_V8)) {
+            if (u && !arm_dc_feature(s, ARM_FEATURE_V8) &&
+                !arm_dc_feature(s, ARM_FEATURE_V8R)) {
                 return 1;
             }
             break;
@@ -7764,7 +7772,8 @@ static int disas_neon_data_insn(DisasContext *s, uint32_t insn)
                     return 1;
                 }
                 if (neon_2rm_is_v8_op(op) &&
-                    !arm_dc_feature(s, ARM_FEATURE_V8)) {
+                    !arm_dc_feature(s, ARM_FEATURE_V8) &&
+                    !arm_dc_feature(s, ARM_FEATURE_V8R)) {
                     return 1;
                 }
                 if ((op != NEON_2RM_VMOVN && op != NEON_2RM_VQMOVN) &&
@@ -8681,7 +8690,8 @@ static int disas_coproc_insn(DisasContext *s, uint32_t insn)
                  * in which case the syndrome information won't actually be
                  * guest visible.
                  */
-                assert(!arm_dc_feature(s, ARM_FEATURE_V8));
+                assert(!arm_dc_feature(s, ARM_FEATURE_V8) &&
+                       !arm_dc_feature(s, ARM_FEATURE_V8R));
                 syndrome = syn_uncategorized();
                 break;
             }

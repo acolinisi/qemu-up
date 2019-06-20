@@ -86,6 +86,8 @@ enum {
     M_REG_NUM_BANKS = 2,
 };
 
+#define NUM_MPU_REGIONS 24
+
 /* ARM-specific interrupt pending bits.  */
 #define CPU_INTERRUPT_FIQ   CPU_INTERRUPT_TGT_EXT_1
 #define CPU_INTERRUPT_VIRQ  CPU_INTERRUPT_TGT_EXT_2
@@ -372,6 +374,7 @@ typedef struct CPUARMState {
             };
             uint64_t far_el[4];
         };
+        uint64_t hifar_el2;
         uint64_t hpfar_el2;
         uint64_t hstr_el2;
         union { /* Translation result. */
@@ -495,6 +498,12 @@ typedef struct CPUARMState {
         uint64_t pmccfiltr_el0; /* Performance Monitor Filter Register */
         uint64_t vpidr_el2; /* Virtualization Processor ID Register */
         uint64_t vmpidr_el2; /* Virtualization Multiprocessor ID Register */
+
+        uint32_t prselr;
+        uint64_t prbar;
+        uint64_t prlar;
+        uint64_t prbar_n[16];
+        uint64_t prlar_n[16];
     } cp15;
 
     struct {
@@ -680,6 +689,30 @@ typedef struct CPUARMState {
         uint32_t mair1[M_REG_NUM_BANKS];
     } pmsav8;
 
+    /* PMSAv8 MPU */
+    struct {
+        /* The PMSAv8 implementation also shares some PMSAv7 config
+         * and state:
+         *  pmsav7.rnr (region number register)
+         *  pmsav7_dregion (number of configured regions)
+         */
+        uint32_t prbar[NUM_MPU_REGIONS];
+        uint32_t prlar[NUM_MPU_REGIONS];
+        uint32_t hprbar[NUM_MPU_REGIONS];
+        uint32_t hprlar[NUM_MPU_REGIONS];
+        uint32_t mair0[2];	/* mair0, hmair0 */
+        uint32_t mair1[2];	/* mair1, hmair1 */
+        uint32_t amair0[2];	/* amair1, ahmair1 */
+        uint32_t amair1[2];	/* amair1, ahmair1 */
+        uint64_t prselr;
+        uint64_t prbar_direct;
+        uint64_t prlar_direct;
+        uint64_t hprselr;
+        uint64_t hprbar_direct;
+        uint64_t hprlar_direct;
+        uint64_t hprenr;
+    } pmsav8r;
+
     /* v8M SAU */
     struct {
         uint32_t *rbar;
@@ -687,6 +720,24 @@ typedef struct CPUARMState {
         uint32_t rnr;
         uint32_t ctrl;
     } sau;
+
+    struct {
+        uint32_t hactlr;
+        uint32_t hrmr;
+        uint32_t imp_periphpregionr;
+        uint32_t imp_flashifregionr;
+        uint32_t imp_buildoptr;
+        uint32_t imp_pinoptr;
+        uint32_t tcmregion[3];
+        uint32_t imp_csctlr;
+        uint32_t imp_bpctlr;
+        uint32_t imp_memprotctlr;
+        uint32_t imp_slavepctlr;
+        uint32_t ich_lr[4];
+        uint32_t ich_lrc[4];
+        uint32_t pmevcntr[4];
+        uint32_t pmevtyper[4];
+    } v8r;
 
     void *nvic;
     const struct arm_boot_info *boot_info;
@@ -800,6 +851,7 @@ struct ARMCPU {
     bool has_mpu;
     /* PMSAv7 MPU number of supported regions */
     uint32_t pmsav7_dregion;
+    uint32_t hmpuir;
     /* v8M SAU number of supported regions */
     uint32_t sau_sregion;
 
@@ -918,6 +970,14 @@ struct ARMCPU {
 
     /* Used to set the maximum vector length the cpu will support.  */
     uint32_t sve_max_vq;
+
+    uint32_t cfgperiphbase;
+    uint32_t imp_pinoptr;
+    uint32_t imp_buildoptr;
+    uint32_t tcmregion[3];
+    uint32_t cfgllppsize;
+    uint32_t cfgllppimp;
+    uint32_t cfgtcmbootx;
 };
 
 static inline ARMCPU *arm_env_get_cpu(CPUARMState *env)
@@ -1796,6 +1856,7 @@ enum arm_features {
     ARM_FEATURE_VBAR, /* has cp15 VBAR */
     ARM_FEATURE_M_SECURITY, /* M profile Security Extension */
     ARM_FEATURE_M_MAIN, /* M profile Main Extension */
+    ARM_FEATURE_V8R,
 };
 
 static inline int arm_feature(CPUARMState *env, int feature)

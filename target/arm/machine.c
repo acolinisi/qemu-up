@@ -361,7 +361,8 @@ static bool pmsav7_needed(void *opaque)
 
     return arm_feature(env, ARM_FEATURE_PMSA) &&
            arm_feature(env, ARM_FEATURE_V7) &&
-           !arm_feature(env, ARM_FEATURE_V8);
+           !arm_feature(env, ARM_FEATURE_V8) &&
+           !arm_feature(env, ARM_FEATURE_V8R);
 }
 
 static bool pmsav7_rgnr_vmstate_validate(void *opaque, int version_id)
@@ -417,7 +418,7 @@ static bool pmsav8_needed(void *opaque)
     CPUARMState *env = &cpu->env;
 
     return arm_feature(env, ARM_FEATURE_PMSA) &&
-        arm_feature(env, ARM_FEATURE_V8);
+        (arm_feature(env, ARM_FEATURE_V8) || arm_feature(env, ARM_FEATURE_V8R));
 }
 
 static const VMStateDescription vmstate_pmsav8 = {

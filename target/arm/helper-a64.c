@@ -963,6 +963,7 @@ void HELPER(exception_return)(CPUARMState *env, uint64_t new_pc)
     int new_el;
     bool return_to_aa64 = (spsr & PSTATE_nRW) == 0;
 
+    assert((!return_to_aa64) || (return_to_aa64 && !arm_feature(env, ARM_FEATURE_V8R)));
     aarch64_save_sp(env, cur_el);
 
     arm_clear_exclusive(env);
@@ -1025,8 +1026,9 @@ void HELPER(exception_return)(CPUARMState *env, uint64_t new_pc)
         } else {
             env->regs[15] = new_pc & ~0x3;
         }
-        qemu_log_mask(CPU_LOG_INT, "Exception return from AArch64 EL%d to "
+        qemu_log_mask(CPU_LOG_INT, "Exception return from AArch%u EL%d to "
                       "AArch32 EL%d PC 0x%" PRIx32 "\n",
+                      ((env->aarch64 == 1) ? 64 : 32),
                       cur_el, new_el, env->regs[15]);
     } else {
         env->aarch64 = 1;

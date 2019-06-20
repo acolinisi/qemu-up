@@ -630,16 +630,18 @@ static void msr_mrs_banked_exc_checks(CPUARMState *env, uint32_t tgtmode,
      */
     int curmode = env->uncached_cpsr & CPSR_M;
 
-    if (regno == 17) {
-        /* ELR_Hyp: a special case because access from tgtmode is OK */
+    if (regno == 17 /* ELR_Hyp */|| regno == 16 /* SPSR_Hyp */) {
+        /* ELR_Hyp, SPSR_Hyp: a special case because access from tgtmode is OK */
         if (curmode != ARM_CPU_MODE_HYP && curmode != ARM_CPU_MODE_MON) {
             goto undef;
         }
         return;
     }
 
-    if (curmode == tgtmode) {
-        goto undef;
+    if (!arm_feature(env, ARM_FEATURE_V8R)) {
+        if (curmode == tgtmode) {
+            goto undef;
+        }
     }
 
     if (tgtmode == ARM_CPU_MODE_USR) {

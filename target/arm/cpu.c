@@ -225,6 +225,13 @@ static void arm_cpu_reset(CPUState *s)
         /* Userspace expects access to cp10 and cp11 for FP/Neon */
         env->cp15.cpacr_el1 = deposit64(env->cp15.cpacr_el1, 20, 4, 0xf);
 #endif
+        if (arm_feature(env, ARM_FEATURE_V8R)) {
+            cpu->env.regs[15] = cpu->rvbar;
+            env->pc = cpu->rvbar;
+        }
+        if (arm_feature(env, ARM_FEATURE_EL2)) {
+            env->pstate = PSTATE_MODE_EL2h;	/* DK 0x9 */
+        }
     }
 
 #if defined(CONFIG_USER_ONLY)
@@ -332,7 +339,7 @@ static void arm_cpu_reset(CPUState *s)
 
     if (arm_feature(env, ARM_FEATURE_PMSA)) {
         if (cpu->pmsav7_dregion > 0) {
-            if (arm_feature(env, ARM_FEATURE_V8)) {
+            if (arm_feature(env, ARM_FEATURE_V8) || arm_feature(env, ARM_FEATURE_V8R)) {
                 memset(env->pmsav8.rbar[M_REG_NS], 0,
                        sizeof(*env->pmsav8.rbar[M_REG_NS])
                        * cpu->pmsav7_dregion);
@@ -362,6 +369,17 @@ static void arm_cpu_reset(CPUState *s)
         env->pmsav8.mair0[M_REG_S] = 0;
         env->pmsav8.mair1[M_REG_NS] = 0;
         env->pmsav8.mair1[M_REG_S] = 0;
+
+        if (arm_feature(env, ARM_FEATURE_V8R)) {
+            env->pmsav8r.mair0[M_REG_NS] = 0;
+            env->pmsav8r.mair0[M_REG_S] = 0;
+            env->pmsav8r.mair1[M_REG_NS] = 0;
+            env->pmsav8r.mair1[M_REG_S] = 0;
+            env->pmsav8r.amair0[M_REG_NS] = 0;
+            env->pmsav8r.amair0[M_REG_S] = 0;
+            env->pmsav8r.amair1[M_REG_NS] = 0;
+            env->pmsav8r.amair1[M_REG_S] = 0;
+        }
     }
 
     if (arm_feature(env, ARM_FEATURE_M_SECURITY)) {
@@ -957,7 +975,7 @@ static void arm_cpu_realizefn(DeviceState *dev, Error **errp)
     }
 
     /* Some features automatically imply others: */
-    if (arm_feature(env, ARM_FEATURE_V8)) {
+    if (arm_feature(env, ARM_FEATURE_V8) || arm_feature(env, ARM_FEATURE_V8R)) {
         if (arm_feature(env, ARM_FEATURE_M)) {
             set_feature(env, ARM_FEATURE_V7);
         } else {
@@ -984,7 +1002,9 @@ static void arm_cpu_realizefn(DeviceState *dev, Error **errp)
          * Security Extensions is ARM_FEATURE_EL3.
          */
         assert(no_aa32 || cpu_isar_feature(arm_div, cpu));
-        set_feature(env, ARM_FEATURE_LPAE);
+        if (!arm_feature(env, ARM_FEATURE_V8R)) {
+            set_feature(env, ARM_FEATURE_LPAE);
+        }
         set_feature(env, ARM_FEATURE_V7);
     }
     if (arm_feature(env, ARM_FEATURE_V7)) {
@@ -1136,7 +1156,6 @@ static void arm_cpu_realizefn(DeviceState *dev, Error **errp)
     if (cpu->pmsav7_dregion == 0) {
         cpu->has_mpu = false;
     }
-
     if (arm_feature(env, ARM_FEATURE_PMSA) &&
         arm_feature(env, ARM_FEATURE_V7)) {
         uint32_t nr = cpu->pmsav7_dregion;
@@ -1147,7 +1166,7 @@ static void arm_cpu_realizefn(DeviceState *dev, Error **errp)
         }
 
         if (nr) {
-            if (arm_feature(env, ARM_FEATURE_V8)) {
+            if (arm_feature(env, ARM_FEATURE_V8) || arm_feature(env, ARM_FEATURE_V8R)) {
                 /* PMSAv8 */
                 env->pmsav8.rbar[M_REG_NS] = g_new0(uint32_t, nr);
                 env->pmsav8.rlar[M_REG_NS] = g_new0(uint32_t, nr);
@@ -1625,6 +1644,51 @@ static void cortex_r5f_initfn(Object *obj)
 
     cortex_r5_initfn(obj);
     set_feature(&cpu->env, ARM_FEATURE_VFP3);
+}
+
+static void cortex_r52f_initfn(Object *obj)
+{
+    ARMCPU *cpu = ARM_CPU(obj);
+
+    set_feature(&cpu->env, ARM_FEATURE_V8R);
+    set_feature(&cpu->env, ARM_FEATURE_VFP3);
+    set_feature(&cpu->env, ARM_FEATURE_NEON);
+    set_feature(&cpu->env, ARM_FEATURE_EL2);
+    set_feature(&cpu->env, ARM_FEATURE_PMSA);
+    set_feature(&cpu->env, ARM_FEATURE_MPIDR);
+    set_feature(&cpu->env, ARM_FEATURE_PMU);	/* DK added: R52 supports it, I'm not sure if Qemu supports that */
+    cpu->midr = 0x410FD130 ; /* r1p3 */
+    cpu->revidr = 0x00000000;
+    cpu->isar.mvfr0 = 0x10110222;
+    cpu->isar.mvfr1 = 0x12111111;
+    cpu->isar.mvfr2 = 0x00000043;
+    cpu->ctr = 0x8144c004;
+    cpu->id_pfr0 = 0x00000131;
+    cpu->id_pfr1 = 0x10111001;
+    cpu->id_dfr0 = 0x03010006;
+    cpu->id_afr0 = 0x00000000;
+    cpu->id_mmfr0 = 0x00211040;
+    cpu->id_mmfr1 = 0x40000000;
+    cpu->id_mmfr2 = 0x01200000;
+    cpu->id_mmfr3 = 0xF0102211;
+    cpu->isar.id_isar0 = 0x02101110;
+    cpu->isar.id_isar1 = 0x13112111;
+    cpu->isar.id_isar2 = 0x21232142;
+    cpu->isar.id_isar3 = 0x01112131;
+    cpu->isar.id_isar4 = 0x00010142;
+    cpu->isar.id_isar5 = 0x00010001;
+    cpu->mp_is_up = true;
+    cpu->reset_sctlr = 0x30c50838;
+    cpu->pmsav7_dregion = 16;
+    cpu->hmpuir = 16;
+    cpu->cfgperiphbase = 0xF9A00000;
+    cpu->cfgllppsize = 0x6;	/* make 2MB peripheral region size */
+    cpu->cfgllppimp = 0; /* Low Latency Peripheral Port is not implemented */
+    cpu->cfgtcmbootx = 0; 	/* no tcm boot */
+				/* TCM: 1MB */
+    cpu->tcmregion[0] = (0xb << 2) | ((cpu->cfgtcmbootx & 0x1) << 1) | (cpu->cfgtcmbootx & 0x1);
+    cpu->tcmregion[1] = (0xb << 2) | ((cpu->cfgtcmbootx & 0x1) << 1) | (cpu->cfgtcmbootx & 0x1);
+    cpu->tcmregion[2] = (0xb << 2) | ((cpu->cfgtcmbootx & 0x1) << 1) | (cpu->cfgtcmbootx & 0x1);
 }
 
 static const ARMCPRegInfo cortexa8_cp_reginfo[] = {
@@ -2110,6 +2174,7 @@ static const ARMCPUInfo arm_cpus[] = {
                              .class_init = arm_v7m_class_init },
     { .name = "cortex-r5",   .initfn = cortex_r5_initfn },
     { .name = "cortex-r5f",  .initfn = cortex_r5f_initfn },
+    { .name = "cortex-r52f",   .initfn = cortex_r52f_initfn },
     { .name = "cortex-a7",   .initfn = cortex_a7_initfn },
     { .name = "cortex-a8",   .initfn = cortex_a8_initfn },
     { .name = "cortex-a9",   .initfn = cortex_a9_initfn },
@@ -2148,6 +2213,17 @@ static Property arm_cpu_properties[] = {
                         mp_affinity, ARM64_AFFINITY_INVALID),
     DEFINE_PROP_INT32("node-id", ARMCPU, node_id, CPU_UNSET_NUMA_NODE_ID),
     DEFINE_PROP_INT32("core-count", ARMCPU, core_count, -1),
+    DEFINE_PROP_UINT64("rvbar", ARMCPU, rvbar, 0),
+    DEFINE_PROP_UINT32("cfgperiphbase", ARMCPU, cfgperiphbase, 0xF9A00000),
+    DEFINE_PROP_UINT32("buildoptr", ARMCPU, imp_buildoptr, 0),
+    DEFINE_PROP_UINT32("pinoptr", ARMCPU, imp_pinoptr, 0),
+#if 0
+    DEFINE_PROP_UINT32("atcmregionr", ARMCPU, tcmregion[0], 0),
+    DEFINE_PROP_UINT32("btcmregionr", ARMCPU, tcmregion[1], 0),
+    DEFINE_PROP_UINT32("ctcmregionr", ARMCPU, tcmregion[2], 0),
+    DEFINE_PROP_UINT32("mpuir", ARMCPU, mpuir, 0),
+    DEFINE_PROP_UINT32("hmpuir", ARMCPU, hmpuir, 0),
+#endif
     DEFINE_PROP_END_OF_LIST()
 };
 
