@@ -11945,11 +11945,11 @@ static inline void get_phys_addr_pmsav7_default(CPUARMState *env,
         case 0x20000000 ... 0x3fffffff: /* SRAM */
         case 0x60000000 ... 0x7fffffff: /* RAM */
         case 0x80000000 ... 0x9fffffff: /* RAM */
+        case 0xa0000000 ... 0xbfffffff: /* HPPS LOW RAM */
+        case 0xc0000000 ... 0xdfffffff: /* window to HPPS HI RAM*/
             *prot = PAGE_READ | PAGE_WRITE | PAGE_EXEC;
             break;
         case 0x40000000 ... 0x5fffffff: /* Peripheral */
-        case 0xa0000000 ... 0xbfffffff: /* Device */
-        case 0xc0000000 ... 0xdfffffff: /* Device */
         case 0xe0000000 ... 0xffffffff: /* System */
             *prot = PAGE_READ | PAGE_WRITE;
             break;
