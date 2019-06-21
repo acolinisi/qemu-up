@@ -991,17 +991,52 @@ static int fdt_init_qdev(char *node_path, FDTMachineInfo *fdti, const char *comp
         const char *propname = trim_vendor(prop->name);
         int len = prop->len;
         void *val = prop->value;
+        bool is_array = false;
+        char *propname_arraylen;
+
+        if (!strcmp(propname, "type")) {
+            continue;
+        }
 
         ObjectProperty *p = object_property_find(OBJECT(dev), propname, NULL);
         if (p) {
             DB_PRINT_NP(1, "matched property: %s of type %s, len %d\n",
                                             propname, p->type, prop->len);
-        }
-        if (!p) {
-            continue;
+        } else { /* try looking the property up as an array */
+            propname_arraylen =
+                g_strdup_printf("%s%s", PROP_ARRAY_LEN_PREFIX, propname);
+            p = object_property_find(OBJECT(dev), propname_arraylen, NULL);
+            if (p) {
+                is_array = true; /* p->type is the element type */
+            } else {
+                g_free(propname_arraylen);
+                continue;
+            }
         }
 
-        if (!strcmp(propname, "type")) {
+        if (is_array) {
+            const int DT_INT_SIZE = 4; /* size of int value in a DT cell */
+            unsigned i;
+            unsigned arraylen = len / DT_INT_SIZE;
+            object_property_set_int(OBJECT(dev), arraylen,
+                                    propname_arraylen, &error_abort);
+            DB_PRINT_NP(0, "set property %s to %u\n", propname_arraylen, arraylen);
+            g_free(propname_arraylen);
+
+            if (!strcmp(p->type, "uint8") || !strcmp(p->type, "uint16") ||
+                !strcmp(p->type, "uint32") || !strcmp(p->type, "uint64")) {
+                for (i = 0; i < arraylen; ++i) {
+                    unsigned elem = get_int_be((uint8_t *)val + i * DT_INT_SIZE, DT_INT_SIZE);
+                    char *propname_elem = g_strdup_printf("%s[%u]", propname, i);
+                    object_property_set_int(OBJECT(dev), elem, propname_elem,
+                            &error_abort);
+                    DB_PRINT_NP(0, "set property %s to %u\n", propname_elem, elem);
+                    g_free(propname_elem);
+                }
+            } else {
+                DB_PRINT_NP(0, "WARNING: property %s is of an unsupported type: "
+                        "array of %s\n", propname, p->type);
+            }
             continue;
         }
 
