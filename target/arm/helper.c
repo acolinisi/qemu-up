@@ -2915,49 +2915,6 @@ void arm_gt_stimer_cb(void *opaque)
     gt_recalc_timer(cpu, GTIMER_SEC);
 }
 
-static const ARMCPRegInfo v8r_pmev_reginfo[] = {
-    { .name = "PMEVCNTR0", .state = ARM_CP_STATE_AA32,
-      .cp = 15, .opc1 = 0, .crn = 14, .crm = 8, .opc2 = 0,
-      .access = PL0_RW, .type = ARM_CP_IO, .raw_writefn = raw_write,
-      .fieldoffset = offsetof(CPUARMState, v8r.pmevcntr[0]),
-      .resetvalue = 0, },
-    { .name = "PMEVCNTR1", .state = ARM_CP_STATE_AA32,
-      .cp = 15, .opc1 = 0, .crn = 14, .crm = 8, .opc2 = 1,
-      .access = PL0_RW, .type = ARM_CP_IO, .raw_writefn = raw_write,
-      .fieldoffset = offsetof(CPUARMState, v8r.pmevcntr[1]),
-      .resetvalue = 0, },
-    { .name = "PMEVCNTR2", .state = ARM_CP_STATE_AA32,
-      .cp = 15, .opc1 = 0, .crn = 14, .crm = 8, .opc2 = 2,
-      .access = PL0_RW, .type = ARM_CP_IO, .raw_writefn = raw_write,
-      .fieldoffset = offsetof(CPUARMState, v8r.pmevcntr[2]),
-      .resetvalue = 0, },
-    { .name = "PMEVCNTR3", .state = ARM_CP_STATE_AA32,
-      .cp = 15, .opc1 = 0, .crn = 14, .crm = 8, .opc2 = 3,
-      .access = PL0_RW, .type = ARM_CP_IO, .raw_writefn = raw_write,
-      .fieldoffset = offsetof(CPUARMState, v8r.pmevcntr[3]),
-      .resetvalue = 0, },
-    { .name = "PMEVTYPER0", .state = ARM_CP_STATE_AA32,
-      .cp = 15, .opc1 = 0, .crn = 14, .crm = 12, .opc2 = 0,
-      .access = PL0_RW, .type = ARM_CP_IO, .raw_writefn = raw_write,
-      .fieldoffset = offsetof(CPUARMState, v8r.pmevtyper[0]),
-      .resetvalue = 0, },
-    { .name = "PMEVTYPER1", .state = ARM_CP_STATE_AA32,
-      .cp = 15, .opc1 = 0, .crn = 14, .crm = 12, .opc2 = 1,
-      .access = PL0_RW, .type = ARM_CP_IO, .raw_writefn = raw_write,
-      .fieldoffset = offsetof(CPUARMState, v8r.pmevtyper[1]),
-      .resetvalue = 0, },
-    { .name = "PMEVTYPER2", .state = ARM_CP_STATE_AA32,
-      .cp = 15, .opc1 = 0, .crn = 14, .crm = 12, .opc2 = 2,
-      .access = PL0_RW, .type = ARM_CP_IO, .raw_writefn = raw_write,
-      .fieldoffset = offsetof(CPUARMState, v8r.pmevtyper[2]),
-      .resetvalue = 0, },
-    { .name = "PMEVTYPER3", .state = ARM_CP_STATE_AA32,
-      .cp = 15, .opc1 = 0, .crn = 14, .crm = 12, .opc2 = 3,
-      .access = PL0_RW, .type = ARM_CP_IO, .raw_writefn = raw_write,
-      .fieldoffset = offsetof(CPUARMState, v8r.pmevtyper[3]),
-      .resetvalue = 0, },
-    REGINFO_SENTINEL
-};
 static const ARMCPRegInfo generic_timer_cp_reginfo[] = {
     /* Note that CNTFRQ is purely reads-as-written for the benefit
      * of software; writing it doesn't actually change the timer frequency.
@@ -5023,12 +4980,6 @@ static const ARMCPRegInfo el2_cp_reginfo[] = {
       .opc0 = 3, .opc1 = 4, .crn = 4, .crm = 0, .opc2 = 1,
       .access = PL2_RW,
       .fieldoffset = offsetof(CPUARMState, elr_el[2]) },
-    { .name = "HSR", .state = ARM_CP_STATE_AA32,
-      .cp = 15, .opc1 = 4, .crn = 5, .crm = 2, .opc2 = 0,
-      .access = PL2_RW, .fieldoffset = offsetof(CPUARMState, cp15.esr_el[2]) },
-    { .name = "HDFAR", .state = ARM_CP_STATE_AA32,
-      .cp = 15, .opc1 = 4, .crn = 6, .crm = 0, .opc2 = 0,
-      .access = PL2_RW, .fieldoffset = offsetof(CPUARMState, cp15.far_el[2]) },
     { .name = "ESR_EL2", .state = ARM_CP_STATE_BOTH,
       .opc0 = 3, .opc1 = 4, .crn = 5, .crm = 2, .opc2 = 0,
       .access = PL2_RW, .fieldoffset = offsetof(CPUARMState, cp15.esr_el[2]) },
@@ -5045,12 +4996,6 @@ static const ARMCPRegInfo el2_cp_reginfo[] = {
       .opc0 = 3, .opc1 = 4, .crn = 4, .crm = 0, .opc2 = 0,
       .access = PL2_RW,
       .fieldoffset = offsetof(CPUARMState, banked_spsr[BANK_HYP]) },
-    { .name = "HVBAR", .state = ARM_CP_STATE_AA32,
-      .cp = 15, .opc1 = 4, .crn = 12, .crm = 0, .opc2 = 0,
-      .access = PL2_RW, .writefn = vbar_write,
-      .accessfn = hstr_t12_access,
-      .fieldoffset = offsetof(CPUARMState, cp15.vbar_el[2]),
-      .resetvalue = 0 },
     { .name = "HRMR", .state = ARM_CP_STATE_AA32,
       .cp = 15, .opc1 = 4, .crn = 12, .crm = 0, .opc2 = 2,
       .access = PL2_RW, .writefn = hrmr_write,
@@ -5060,6 +5005,7 @@ static const ARMCPRegInfo el2_cp_reginfo[] = {
     { .name = "VBAR_EL2", .state = ARM_CP_STATE_BOTH,
       .opc0 = 3, .opc1 = 4, .crn = 12, .crm = 0, .opc2 = 0,
       .access = PL2_RW, .writefn = vbar_write,
+      .accessfn = hstr_t12_access,
       .fieldoffset = offsetof(CPUARMState, cp15.vbar_el[2]),
       .resetvalue = 0 },
     { .name = "SP_EL2", .state = ARM_CP_STATE_AA64,
@@ -5249,14 +5195,6 @@ static const ARMCPRegInfo el2_cp_reginfo[] = {
        */
       .access = PL2_RW, .resetvalue = 3,
       .fieldoffset = offsetof(CPUARMState, cp15.cnthctl_el2) },
-    { .name = "CNTHCTL", .state = ARM_CP_STATE_AA32,
-      .cp = 15, .opc1 = 4, .crn = 14, .crm = 1, .opc2 = 0,
-      /* ARMv7 requires bit 0 and 1 to reset to 1. ARMv8 defines the
-       * reset values as IMPDEF. We choose to reset to 3 to comply with
-       * both ARMv7 and ARMv8.
-       */
-      .access = PL2_RW, .resetvalue = 3,
-      .fieldoffset = offsetof(CPUARMState, cp15.cnthctl_el2) },
     { .name = "CNTVOFF_EL2", .state = ARM_CP_STATE_AA64,
       .opc0 = 3, .opc1 = 4, .crn = 14, .crm = 0, .opc2 = 3,
       .access = PL2_RW, .type = ARM_CP_IO, .resetvalue = 0,
@@ -5321,10 +5259,6 @@ static const ARMCPRegInfo el2_cp_reginfo[] = {
       .cp = 15, .opc1 = 4, .crn = 1, .crm = 1, .opc2 = 1,
       .access = PL2_RW, .resetvalue = 0,
       .fieldoffset = offsetof(CPUARMState, cp15.mdcr_el2), },
-    { .name = "HIFAR", .state = ARM_CP_STATE_AA32,
-      .cp = 15, .opc1 = 4, .crn = 6, .crm = 0, .opc2 = 2,
-      .access = PL2_RW, .accessfn = access_el3_aa32ns,
-      .fieldoffset = offsetof(CPUARMState, cp15.hifar_el2) },
     { .name = "HSTR", .state = ARM_CP_STATE_AA32,
       .cp = 15, .opc1 = 4, .crn = 1, .crm = 1, .opc2 = 3,
       .access = PL2_RW,
@@ -7125,7 +7059,6 @@ void register_cp_regs_for_features(ARMCPU *cpu)
         else if (arm_feature(env, ARM_FEATURE_V8R)) {
             define_arm_cp_regs(cpu, id_v8r_midr_cp_reginfo);
             define_arm_cp_regs(cpu, id_v8r_ich_reginfo);
-            define_arm_cp_regs(cpu, v8r_pmev_reginfo);
         } else {
             define_arm_cp_regs(cpu, id_pre_v8_midr_cp_reginfo);
         }
