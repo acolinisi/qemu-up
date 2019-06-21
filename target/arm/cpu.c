@@ -619,6 +619,37 @@ static bool arm_cpu_virtio_is_big_endian(CPUState *cs)
 
 #endif
 
+#ifndef CONFIG_USER_ONLY
+static void arm_cpu_set_ncpuhalt(void *opaque, int irq, int level)
+{
+    CPUState *cs = opaque;
+    ARMCPU *cpu = ARM_CPU(cs);
+    int old_value = cs->arch_halt_pin;
+
+    /* FIXME: This code should be active in order to implement the semantic
+     * where an already running CPU cannot be halted. This doesn't work though,
+     * as QEMU can not make any guarantees on initial ordering of setting the
+     * halt/reset GPIOs on machine init. So just make nCPUHALT a regular halt
+     * for the moment.
+     */
+#if 0
+    if (!cs->reset_pin) {
+        return;
+    }
+#endif
+    cs->arch_halt_pin = level;
+    /* As we set the powered_off status on CPU reset we need to make sure that
+     * we unset it as well.
+     */
+    cpu->power_state = level ? PSCI_OFF : PSCI_ON;
+    cpu_halt_update(cs);
+
+    if (cs->arch_halt_pin != old_value && !cs->arch_halt_pin && !cs->reset_pin) {
+        cpu_interrupt(cs, CPU_INTERRUPT_EXITTB);
+    }
+}
+#endif
+
 static inline void set_feature(CPUARMState *env, int feature)
 {
     env->features |= 1ULL << feature;
@@ -734,6 +765,8 @@ static void arm_cpu_initfn(Object *obj)
     } else {
         qdev_init_gpio_in(DEVICE(cpu), arm_cpu_set_irq, 4);
     }
+
+    qdev_init_gpio_in_named(DEVICE(cpu), arm_cpu_set_ncpuhalt, "ncpuhalt", 1);
 
     qdev_init_gpio_out(DEVICE(cpu), cpu->gt_timer_outputs,
                        ARRAY_SIZE(cpu->gt_timer_outputs));

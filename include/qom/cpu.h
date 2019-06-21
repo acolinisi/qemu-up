@@ -452,6 +452,10 @@ struct CPUState {
 
     /* track IOMMUs whose translations we've cached in the TCG TLB */
     GArray *iommu_notifiers;
+
+    bool reset_pin; /* state of reset pin */
+    bool halt_pin; /* state of halt pin */
+    bool arch_halt_pin;
 };
 
 typedef QTAILQ_HEAD(CPUTailQ, CPUState) CPUTailQ;
@@ -1127,6 +1131,10 @@ extern const struct VMStateDescription vmstate_cpu_common;
 }
 
 #endif /* NEED_CPU_H */
+
+void cpu_halt_gpio(void *opaque, int irq, int level);
+void cpu_reset_gpio(void *opaque, int irq, int level);
+void cpu_halt_update(CPUState *cpu);
 
 #define UNASSIGNED_CPU_INDEX -1
 #define UNASSIGNED_CLUSTER_INDEX -1

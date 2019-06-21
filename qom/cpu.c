@@ -394,6 +394,9 @@ static void cpu_common_initfn(Object *obj)
     QTAILQ_INIT(&cpu->breakpoints);
     QTAILQ_INIT(&cpu->watchpoints);
 
+    qdev_init_gpio_in_named(DEVICE(obj), cpu_reset_gpio, "reset", 1);
+    qdev_init_gpio_in_named(DEVICE(obj), cpu_halt_gpio, "halt", 1);
+
     cpu_exec_initfn(cpu);
 }
 
