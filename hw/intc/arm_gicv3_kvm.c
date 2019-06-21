@@ -792,7 +792,7 @@ static void kvm_arm_gicv3_realize(DeviceState *dev, Error **errp)
     }
 
     for (i = 0; i < s->num_cpu; i++) {
-        ARMCPU *cpu = ARM_CPU(qemu_get_cpu(i));
+        ARMCPU *cpu = ARM_CPU(qemu_get_cpu(s->cpu_start_id + i));
 
         define_arm_cp_regs(cpu, gicv3_cpuif_reginfo);
     }
