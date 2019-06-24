@@ -196,8 +196,8 @@ static const FDTGenericGPIOSet hpsc_reset_ctrl_controller_gpios [] = {
     {
         .names = &fdt_generic_gpio_name_set_gpio,
         .gpios = (FDTGenericGPIOConnection [])  {
-            { .name = "n_cpu_halt",           .fdt_index = 0 * NUM_CPUS, .range = NUM_CPUS },
-            { .name = "cpu_reset",              .fdt_index = 1 * NUM_CPUS, .range = NUM_CPUS },
+            { .name = "n_cpu_halt",         .fdt_index = 0 * NUM_CPUS, .range = NUM_CPUS },
+            { .name = "cpu_reset",          .fdt_index = 1 * NUM_CPUS, .range = NUM_CPUS },
             { .name = "wfi_in",             .fdt_index = 2 * NUM_CPUS, .range = NUM_CPUS },
             { .name = "intc_reset",         .fdt_index = 3 * NUM_CPUS, .range = NUM_INTC },
             { },
