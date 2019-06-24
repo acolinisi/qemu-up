@@ -114,12 +114,12 @@ static const RegisterAccessInfo hpsc_reset_ctrl_regs_info[] = {
     },{
         .name = "CPU_RESET",  .addr = A_CPU_RESET,
         .reset = 0x0,
-        .rsvd = 0xffffffff, /* TODO: function of NUM_CPUS */
+        .rsvd = 0xfffffffc, /* TODO: function of NUM_CPUS */
         .post_write = hpsc_reset_reset_post_write,
     },{
         .name = "INTC_RESET",  .addr = A_INTC_RESET,
         .reset = 0x0,
-        .rsvd = 0xffffffff, /* TODO: function of NUM_INTC */
+        .rsvd = 0xfffffffe, /* TODO: function of NUM_INTC */
         .post_write = hpsc_reset_intc_reset_post_write,
     }
 };
@@ -176,8 +176,8 @@ static void hpsc_reset_ctrl_init(Object *obj)
     qdev_init_gpio_out_named(DEVICE(obj), s->wfi_out, "wfi_out", NUM_CPUS);
 
     /* output control signals connected to the inputs on the CPUs */
-    qdev_init_gpio_out_named(DEVICE(obj), s->ncpuhalt_irqs, "ncpuhalt", NUM_CPUS);
-    qdev_init_gpio_out_named(DEVICE(obj), s->reset_irqs, "reset", NUM_CPUS);
+    qdev_init_gpio_out_named(DEVICE(obj), s->ncpuhalt_irqs, "n_cpu_halt", NUM_CPUS);
+    qdev_init_gpio_out_named(DEVICE(obj), s->reset_irqs, "cpu_reset", NUM_CPUS);
     qdev_init_gpio_out_named(DEVICE(obj), s->intc_reset_irqs, "intc_reset", NUM_INTC);
 }
 
