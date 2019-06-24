@@ -22,16 +22,19 @@
      OBJECT_CHECK(HPSCResetCtrl, (obj), TYPE_HPSC_RESET_CTRL)
 
 #define NUM_CPUS 2 /* TODO: make a DT property */
+#define NUM_INTC 1 /* TODO: make a DT property */
 
 /* The register interface exposed to SW separates the control over halt and
  * reset. This may change in the future (halt is a hardware detail that might
  * not need to be exposed to sofware). */
-REG32(HALT, 0x0)
-    FIELD(HALT, HALT, 0, NUM_CPUS)
-REG32(RESET, 0x4)
-    FIELD(RESET, RESET, 0, NUM_CPUS)
+REG32(N_CPU_HALT, 0x0)
+    FIELD(N_CPU_HALT, N_CPU_HALT, 0, NUM_CPUS)
+REG32(CPU_RESET, 0x4)
+    FIELD(CPU_RESET, CPU_RESET, 0, NUM_CPUS)
+REG32(INTC_RESET, 0x8)
+    FIELD(INTC_RESET, INTC_RESET, 0, NUM_INTC)
 
-#define REG_MAX (R_RESET + 1)
+#define REG_MAX (R_INTC_RESET + 1)
 
 typedef struct HPSCResetCtrl {
     SysBusDevice parent_obj;
@@ -40,6 +43,7 @@ typedef struct HPSCResetCtrl {
     /* Output control signals connected to inputs on the CPUs */
     qemu_irq ncpuhalt_irqs[NUM_CPUS];
     qemu_irq reset_irqs[NUM_CPUS];
+    qemu_irq intc_reset_irqs[NUM_CPUS];
 
     /* Output signal that exposes CPU WFI states outside this reset controler */
     qemu_irq wfi_out[NUM_CPUS];
@@ -62,6 +66,7 @@ static void hpsc_reset_halt_post_write(RegisterInfo *reg, uint64_t val)
     unsigned cpu_idx;
 
     for (cpu_idx = 0; cpu_idx < NUM_CPUS; ++cpu_idx) {
+        /* invert polarity to match CPU interface */
         qemu_set_irq(s->ncpuhalt_irqs[cpu_idx], !(val & (1 << cpu_idx)));
     }
 }
@@ -72,25 +77,55 @@ static void hpsc_reset_reset_post_write(RegisterInfo *reg, uint64_t val)
     unsigned cpu_idx;
 
     for (cpu_idx = 0; cpu_idx < NUM_CPUS; ++cpu_idx) {
-        qemu_set_irq(s->reset_irqs[cpu_idx], !(val & (1 << cpu_idx)));
+        qemu_set_irq(s->reset_irqs[cpu_idx], val & (1 << cpu_idx));
     }
 }
 
+static void hpsc_reset_intc_reset_post_write(RegisterInfo *reg, uint64_t val)
+{
+    HPSCResetCtrl *s = HPSC_RESET_CTRL(reg->opaque);
+    unsigned intc_idx;
+
+    for (intc_idx = 0; intc_idx < NUM_CPUS; ++intc_idx) {
+        qemu_set_irq(s->intc_reset_irqs[intc_idx], val & (1 << intc_idx));
+    }
+}
+
+static uint64_t hpsc_reset_ctrl_read(void *opaque, hwaddr addr, unsigned size)
+{
+    HPSCResetCtrl *s = HPSC_RESET_CTRL(opaque);
+    RegisterInfo *r = &s->regs_info[addr / 4];
+    return register_read(r, ~0, NULL, false);
+}
+
+static void hpsc_reset_ctrl_write(void *opaque, hwaddr addr, uint64_t value,
+                      unsigned size)
+{
+    HPSCResetCtrl *s = HPSC_RESET_CTRL(opaque);
+    RegisterInfo *r = &s->regs_info[addr / 4];
+    register_write(r, value, ~0, NULL, false);
+}
+
 static const RegisterAccessInfo hpsc_reset_ctrl_regs_info[] = {
-    { .name = "HALT",  .addr = A_HALT,
+    { .name = "N_CPU_HALT",  .addr = A_N_CPU_HALT,
         .reset = 0x0,
-        .rsvd = 0xfffffffc, /* TODO: function of num_cpus */
+        .rsvd = 0xfffffffc, /* TODO: function of NUM_CPUS */
         .post_write = hpsc_reset_halt_post_write,
     },{
-        .name = "RESET",  .addr = A_RESET,
+        .name = "CPU_RESET",  .addr = A_CPU_RESET,
         .reset = 0x0,
-        .rsvd = 0xfffffffc, /* TODO: function of num_cpus */
+        .rsvd = 0xffffffff, /* TODO: function of NUM_CPUS */
         .post_write = hpsc_reset_reset_post_write,
+    },{
+        .name = "INTC_RESET",  .addr = A_INTC_RESET,
+        .reset = 0x0,
+        .rsvd = 0xffffffff, /* TODO: function of NUM_INTC */
+        .post_write = hpsc_reset_intc_reset_post_write,
     }
 };
 static const MemoryRegionOps hpsc_reset_ctrl_ops = {
-    .read = register_read_memory,
-    .write = register_write_memory,
+    .read = hpsc_reset_ctrl_read,
+    .write = hpsc_reset_ctrl_write,
     .endianness = DEVICE_LITTLE_ENDIAN,
     .valid = {
         .min_access_size = 4,
@@ -110,28 +145,28 @@ static void hpsc_reset_ctrl_reset(DeviceState *dev)
 
 static void hpsc_reset_ctrl_realize(DeviceState *dev, Error **errp)
 {
-#if 0
     HPSCResetCtrl *s = HPSC_RESET_CTRL(dev);
-#endif
+    unsigned int i;
+
+    for (i = 0; i < ARRAY_SIZE(hpsc_reset_ctrl_regs_info); ++i) {
+        RegisterInfo *r = &s->regs_info[hpsc_reset_ctrl_regs_info[i].addr / 4];
+
+        *r = (RegisterInfo) {
+            .data = (uint8_t *)&s->regs[hpsc_reset_ctrl_regs_info[i].addr / 4],
+            .data_size = sizeof(uint32_t),
+            .access = &hpsc_reset_ctrl_regs_info[i],
+            .opaque = s,
+        };
+    }
 }
 
 static void hpsc_reset_ctrl_init(Object *obj)
 {
     HPSCResetCtrl *s = HPSC_RESET_CTRL(obj);
     SysBusDevice *sbd = SYS_BUS_DEVICE(obj);
-    RegisterInfoArray *reg_array;
 
-    memory_region_init(&s->iomem, obj, TYPE_HPSC_RESET_CTRL, REG_MAX * 4);
-    reg_array =
-        register_init_block32(DEVICE(obj), hpsc_reset_ctrl_regs_info,
-                              ARRAY_SIZE(hpsc_reset_ctrl_regs_info),
-                              s->regs_info, s->regs,
-                              &hpsc_reset_ctrl_ops,
-                              HPSC_RESET_CTRL_ERR_DEBUG,
-                              REG_MAX * 4);
-    memory_region_add_subregion(&s->iomem,
-                                0x0,
-                                &reg_array->mem);
+    memory_region_init_io(&s->iomem, obj, &hpsc_reset_ctrl_ops,
+                          s, TYPE_HPSC_RESET_CTRL, REG_MAX * 4);
     sysbus_init_mmio(sbd, &s->iomem);
 
     /* wfi_in is the signal output by the CPU when it enters WFI state */
@@ -143,6 +178,7 @@ static void hpsc_reset_ctrl_init(Object *obj)
     /* output control signals connected to the inputs on the CPUs */
     qdev_init_gpio_out_named(DEVICE(obj), s->ncpuhalt_irqs, "ncpuhalt", NUM_CPUS);
     qdev_init_gpio_out_named(DEVICE(obj), s->reset_irqs, "reset", NUM_CPUS);
+    qdev_init_gpio_out_named(DEVICE(obj), s->intc_reset_irqs, "intc_reset", NUM_INTC);
 }
 
 static const VMStateDescription vmstate_hpsc_reset_ctrl = {
@@ -160,9 +196,10 @@ static const FDTGenericGPIOSet hpsc_reset_ctrl_controller_gpios [] = {
     {
         .names = &fdt_generic_gpio_name_set_gpio,
         .gpios = (FDTGenericGPIOConnection [])  {
-            { .name = "ncpuhalt",           .fdt_index = 0 * NUM_CPUS, .range = NUM_CPUS },
-            { .name = "reset",              .fdt_index = 1 * NUM_CPUS, .range = NUM_CPUS },
+            { .name = "n_cpu_halt",           .fdt_index = 0 * NUM_CPUS, .range = NUM_CPUS },
+            { .name = "cpu_reset",              .fdt_index = 1 * NUM_CPUS, .range = NUM_CPUS },
             { .name = "wfi_in",             .fdt_index = 2 * NUM_CPUS, .range = NUM_CPUS },
+            { .name = "intc_reset",         .fdt_index = 3 * NUM_CPUS, .range = NUM_INTC },
             { },
         },
     },
