@@ -21,8 +21,8 @@
 #define HPSC_RESET_CTRL(obj) \
      OBJECT_CHECK(HPSCResetCtrl, (obj), TYPE_HPSC_RESET_CTRL)
 
-#define NUM_CPUS 2 /* TODO: make a DT property */
-#define NUM_INTC 1 /* TODO: make a DT property */
+#define NUM_CPUS 11 /* TODO: make a DT property */
+#define NUM_INTC  3 /* TODO: make a DT property */
 
 /* The register interface exposed to SW separates the control over halt and
  * reset. This may change in the future (halt is a hardware detail that might
@@ -109,17 +109,17 @@ static void hpsc_reset_ctrl_write(void *opaque, hwaddr addr, uint64_t value,
 static const RegisterAccessInfo hpsc_reset_ctrl_regs_info[] = {
     { .name = "N_CPU_HALT",  .addr = A_N_CPU_HALT,
         .reset = 0x0,
-        .rsvd = 0xfffffffc, /* TODO: function of NUM_CPUS */
+        .rsvd = 0xffffc000, /* TODO: function of NUM_CPUS */
         .post_write = hpsc_reset_halt_post_write,
     },{
         .name = "CPU_RESET",  .addr = A_CPU_RESET,
         .reset = 0x0,
-        .rsvd = 0xfffffffc, /* TODO: function of NUM_CPUS */
+        .rsvd = 0xffffc000, /* TODO: function of NUM_CPUS */
         .post_write = hpsc_reset_reset_post_write,
     },{
         .name = "INTC_RESET",  .addr = A_INTC_RESET,
         .reset = 0x0,
-        .rsvd = 0xfffffffe, /* TODO: function of NUM_INTC */
+        .rsvd = 0xfffffff8, /* TODO: function of NUM_INTC */
         .post_write = hpsc_reset_intc_reset_post_write,
     }
 };
