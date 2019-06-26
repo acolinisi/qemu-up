@@ -14,6 +14,8 @@
 #ifndef MEMATTRS_H
 #define MEMATTRS_H
 
+#include "qom/object.h"
+
 /* Every memory transaction has associated with it a set of
  * attributes. Some of these are generic (such as the ID of
  * the bus master); some are specific to a particular kind of
@@ -23,6 +25,8 @@
  * different semantics.
  */
 typedef struct MemTxAttrs {
+    Object parent_obj;
+
     /* Bus masters which don't specify any attributes will get this
      * (via the MEMTXATTRS_UNSPECIFIED constant), so that we can
      * distinguish "all attributes deliberately clear" from
