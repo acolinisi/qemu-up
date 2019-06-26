@@ -2247,7 +2247,6 @@ static Property arm_cpu_properties[] = {
                         mp_affinity, ARM64_AFFINITY_INVALID),
     DEFINE_PROP_INT32("node-id", ARMCPU, node_id, CPU_UNSET_NUMA_NODE_ID),
     DEFINE_PROP_INT32("core-count", ARMCPU, core_count, -1),
-    DEFINE_PROP_UINT64("rvbar", ARMCPU, rvbar, 0),
     DEFINE_PROP_UINT32("cfgperiphbase", ARMCPU, cfgperiphbase, 0xF9A00000),
     DEFINE_PROP_UINT32("buildoptr", ARMCPU, imp_buildoptr, 0),
     DEFINE_PROP_UINT32("pinoptr", ARMCPU, imp_pinoptr, 0),
