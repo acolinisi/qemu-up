@@ -269,6 +269,9 @@ typedef struct IOMMUMemoryRegionClass {
      */
     IOMMUTLBEntry (*translate)(IOMMUMemoryRegion *iommu, hwaddr addr,
                                IOMMUAccessFlags flag, int iommu_idx);
+    IOMMUTLBEntry (*translate_with_attrs)(IOMMUMemoryRegion *iommu, hwaddr addr,
+                               IOMMUAccessFlags flag, int iommu_idx,
+                               MemTxAttrs *attrs);
     /* Returns minimum supported page size in bytes.
      * If this method is not provided then the minimum is assumed to
      * be TARGET_PAGE_SIZE.

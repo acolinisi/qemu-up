@@ -717,7 +717,7 @@ static void tcg_iommu_free_notifier_list(CPUState *cpu)
 MemoryRegionSection *
 address_space_translate_for_iotlb(CPUState *cpu, int asidx, hwaddr addr,
                                   hwaddr *xlat, hwaddr *plen,
-                                  MemTxAttrs attrs, int *prot)
+                                  MemTxAttrs *attrs, int *prot)
 {
     MemoryRegionSection *section;
     IOMMUMemoryRegion *iommu_mr;
@@ -736,12 +736,16 @@ address_space_translate_for_iotlb(CPUState *cpu, int asidx, hwaddr addr,
 
         imrc = memory_region_get_iommu_class_nocheck(iommu_mr);
 
-        iommu_idx = imrc->attrs_to_index(iommu_mr, attrs);
+        iommu_idx = imrc->attrs_to_index(iommu_mr, *attrs);
         tcg_register_iommu_notifier(cpu, iommu_mr, iommu_idx);
         /* We need all the permissions, so pass IOMMU_NONE so the IOMMU
          * doesn't short-cut its translation table walk.
          */
-        iotlb = imrc->translate(iommu_mr, addr, IOMMU_NONE, iommu_idx);
+        if (imrc->translate_with_attrs) {
+            iotlb = imrc->translate_with_attrs(iommu_mr, addr, IOMMU_NONE, iommu_idx, attrs);
+        } else {
+            iotlb = imrc->translate(iommu_mr, addr, IOMMU_NONE, iommu_idx);
+        }
         addr = ((iotlb.translated_addr & ~iotlb.addr_mask)
                 | (addr & iotlb.addr_mask));
         /* Update the caller's prot bits to remove permissions the IOMMU
