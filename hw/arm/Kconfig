@@ -125,3 +125,7 @@ config MUSCA
 
 config FDT_GENERIC
     bool
+
+config HPSC
+    bool
+    select PTIMER
