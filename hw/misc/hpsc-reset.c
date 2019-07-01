@@ -166,7 +166,7 @@ static void hpsc_reset_ctrl_init(Object *obj)
     SysBusDevice *sbd = SYS_BUS_DEVICE(obj);
 
     memory_region_init_io(&s->iomem, obj, &hpsc_reset_ctrl_ops,
-                          s, TYPE_HPSC_RESET_CTRL, REG_MAX * 4);
+                          s, TYPE_HPSC_RESET_CTRL, /*REG_MAX * 4*/ 0x400);
     sysbus_init_mmio(sbd, &s->iomem);
 
     /* wfi_in is the signal output by the CPU when it enters WFI state */

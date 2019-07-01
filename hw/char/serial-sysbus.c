@@ -47,7 +47,7 @@ static void serial_sysbus_init(Object *obj)
     sysbus_init_irq(SYS_BUS_DEVICE(s), &s->sdev.irq);
 
     memory_region_init_io(&sdev->io, NULL, &serial_mm_ops[DEVICE_NATIVE_ENDIAN],
-                          sdev, "sysbus-serial", REGION_SIZE);
+                          sdev, "sysbus-serial", /* REGION_SIZE */ 0x400);
     sysbus_init_mmio(SYS_BUS_DEVICE(s), &sdev->io);
 }
 
