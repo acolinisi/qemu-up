@@ -483,8 +483,13 @@ static MemoryRegionSection address_space_translate_iommu(IOMMUMemoryRegion *iomm
             iommu_idx = imrc->attrs_to_index(iommu_mr, attrs);
         }
 
-        iotlb = imrc->translate(iommu_mr, addr, is_write ?
-                                IOMMU_WO : IOMMU_RO, iommu_idx);
+        if (imrc->translate_with_attrs) {
+            iotlb = imrc->translate_with_attrs(iommu_mr, addr, is_write ?
+                                    IOMMU_WO : IOMMU_RO, iommu_idx, &attrs);
+        } else {
+            iotlb = imrc->translate(iommu_mr, addr, is_write ?
+                                    IOMMU_WO : IOMMU_RO, iommu_idx);
+        }
 
         if (!(iotlb.perm & (1 << is_write))) {
             goto unassigned;
