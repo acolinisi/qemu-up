@@ -21,6 +21,8 @@
 #include "hw/intc/arm_gicv3.h"
 #include "gicv3_internal.h"
 
+#include "hw/fdt_generic_util.h"
+
 static bool irqbetter(GICv3CPUState *cs, int irq, uint8_t prio)
 {
     /* Return true if this IRQ at this priority should take
