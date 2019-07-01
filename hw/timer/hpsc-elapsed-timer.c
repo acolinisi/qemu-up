@@ -73,6 +73,10 @@ DEP_REG32(REG_CMD_FIRE,         0x44)
 
 #define R_MAX (R_REG_CMD_FIRE + 1)
 
+/* Align memory-mapped IO region to page size */
+#define IOMEM_PAGE_SIZE 0x400
+#define IOMEM_REGION_SIZE   (((R_MAX * 4) / IOMEM_PAGE_SIZE + 1) * IOMEM_PAGE_SIZE)
+
 #define PTIMER_MODE_ONE_SHOT 1
 #define PTIMER_MODE_CONT     0
 
@@ -610,7 +614,7 @@ static void hpsc_elapsed_timer_init(Object *obj)
     SysBusDevice *sbd = SYS_BUS_DEVICE(obj);
 
     memory_region_init_io(&s->iomem, obj, &hpsc_elapsed_ops, s,
-                          TYPE_HPSC_ELAPSED_TIMER, R_MAX * 4);
+                          TYPE_HPSC_ELAPSED_TIMER, IOMEM_REGION_SIZE);
     sysbus_init_mmio(sbd, &s->iomem);
 
     sysbus_init_irq(SYS_BUS_DEVICE(s), &s->irq);
