@@ -125,6 +125,7 @@ typedef struct CPUIOTLBEntry {
      */
     hwaddr addr;
     MemTxAttrs attrs;
+    MemoryRegionSection *section;
 } CPUIOTLBEntry;
 
 /**

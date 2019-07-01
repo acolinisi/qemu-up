@@ -794,6 +794,7 @@ void tlb_set_page_with_attrs(CPUState *cpu, target_ulong vaddr,
      */
     env->iotlb[mmu_idx][index].addr = iotlb - vaddr_page;
     env->iotlb[mmu_idx][index].attrs = attrs;
+    env->iotlb[mmu_idx][index].section = section;
 
     /* Now calculate the new entry */
     tn.addend = addend - vaddr_page;
@@ -891,7 +892,7 @@ static uint64_t io_readx(CPUArchState *env, CPUIOTLBEntry *iotlbentry,
         /* Fall through for handling IO accesses */
     }
 
-    section = iotlb_to_section(cpu, iotlbentry->addr, iotlbentry->attrs);
+    section = iotlbentry->section;
     mr = section->mr;
     mr_offset = (iotlbentry->addr & TARGET_PAGE_MASK) + addr;
     cpu->mem_io_pc = retaddr;
@@ -959,7 +960,7 @@ static void io_writex(CPUArchState *env, CPUIOTLBEntry *iotlbentry,
         /* Fall through for handling IO accesses */
     }
 
-    section = iotlb_to_section(cpu, iotlbentry->addr, iotlbentry->attrs);
+    section = iotlbentry->section;
     mr = section->mr;
     mr_offset = (iotlbentry->addr & TARGET_PAGE_MASK) + addr;
     if (mr != &io_mem_rom && mr != &io_mem_notdirty && !cpu->can_do_io) {
