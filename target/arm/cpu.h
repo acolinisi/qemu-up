@@ -3228,6 +3228,14 @@ enum {
 /* Return the address space index to use for a memory access */
 static inline int arm_asidx_from_attrs(CPUState *cs, MemTxAttrs attrs)
 {
+    CPUARMState *env = cs->env_ptr;
+
+    /* CPUs without TrustZone have only one address space */
+    if ((arm_feature(env, ARM_FEATURE_M) &&
+        !arm_feature(env, ARM_FEATURE_M_SECURITY)) ||
+        arm_feature(env, ARM_FEATURE_V8R)) {
+        return ARMASIdx_NS;
+    }
     return attrs.secure ? ARMASIdx_S : ARMASIdx_NS;
 }
 
