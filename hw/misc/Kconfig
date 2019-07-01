@@ -98,6 +98,9 @@ config TZ_MSC
 config TZ_PPC
     bool
 
+config TZ_BRIDGE
+    bool
+
 config IOTKIT_SECCTL
     bool
 
