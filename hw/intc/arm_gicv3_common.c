@@ -315,7 +315,6 @@ static int arm_gicv3_common_fdt_get_irq(FDTGenericIntc *obj, qemu_irq *irqs,
     GICv3State *gs = ARM_GICV3_COMMON(obj);
     int cpu = 0;
     uint32_t idx;
-    unsigned matches;
 
     if (ncells != 3) {
         error_setg(errp, "ARM GIC requires 3 interrupt cells, %d cells given",
@@ -339,14 +338,13 @@ static int arm_gicv3_common_fdt_get_irq(FDTGenericIntc *obj, qemu_irq *irqs,
                        "index %" PRId32 " given", idx);
             return 0;
         }
-        matches = 0;
-        for (cpu = 0; matches < max && cpu < gs->num_cpu; cpu++) {
+        for (cpu = 0; cpu < max && cpu < gs->num_cpu; cpu++) {
             if (cells[2] & 1 << (cpu + 8)) {
                 *irqs = qdev_get_gpio_in(DEVICE(obj),
                                          gs->num_irq - 16 + idx + cpu * 32);
-                irqs++;
                 matches++;
             }
+            irqs++;
         }
         return cpu;
     default:
