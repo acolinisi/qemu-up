@@ -1,6 +1,6 @@
 #include "qemu/osdep.h"
 #include "hw/sysbus.h"
-#include "hw/register-dep.h"
+#include "hw/register.h"
 #include "qemu/bitops.h"
 #include "qapi/error.h"
 #include "qemu/log.h"
@@ -43,33 +43,33 @@
 
 // TODO: is there support for 64-bit registers? to avoid HI,LO
 
-DEP_REG32(REG_CAPTURED_LO,      0x00)
-DEP_REG32(REG_CAPTURED_HI,      0x04)
-DEP_REG32(REG_LOAD_LO,          0x08)
-DEP_REG32(REG_LOAD_HI,          0x0c)
-DEP_REG32(REG_EVENT_LO,         0x10)
-DEP_REG32(REG_EVENT_HI,         0x14)
-DEP_REG32(REG_SYNC_LO,          0x18)
-DEP_REG32(REG_SYNC_HI,          0x1c)
-DEP_REG32(REG_PAUSE,            0x20)
-DEP_REG32(REG_SYNC_INTERVAL,    0x24)
-DEP_REG32(REG_STATUS,           0x28)
-    DEP_FIELD(REG_STATUS, EVENT,       1, 0)
-    DEP_FIELD(REG_STATUS, SYNC,        1, 1)
-    DEP_FIELD(REG_STATUS, PAUSE,       1, 2)
-    DEP_FIELD(REG_STATUS, PULSE_OUT,   1, 3)
-    DEP_FIELD(REG_STATUS, SYNC_PERIOD, 1, 4)
-DEP_REG32(REG_SYNC_PERIOD,      0x2c) // 32-bit field of STATUS reg in spec
-DEP_REG32(REG_CONFIG_LO,        0x30)
-    DEP_FIELD(REG_CONFIG_LO, SYNC_SOURCE,  3, 0) // Sync Select in spec
-    DEP_FIELD(REG_CONFIG_LO, TICKDIV,     16, 3)
-DEP_REG32(REG_CONFIG_HI,        0x34)
-DEP_REG32(REG_PULSE_THRES,      0x38) // 32-bit filed of Pulse Config reg in spec
-DEP_REG32(REG_PULSE_CONFIG,     0x3c)
-    DEP_FIELD(REG_PULSE_CONFIG, PULSE_WIDTH, 16, 0)
+REG32(REG_CAPTURED_LO,      0x00)
+REG32(REG_CAPTURED_HI,      0x04)
+REG32(REG_LOAD_LO,          0x08)
+REG32(REG_LOAD_HI,          0x0c)
+REG32(REG_EVENT_LO,         0x10)
+REG32(REG_EVENT_HI,         0x14)
+REG32(REG_SYNC_LO,          0x18)
+REG32(REG_SYNC_HI,          0x1c)
+REG32(REG_PAUSE,            0x20)
+REG32(REG_SYNC_INTERVAL,    0x24)
+REG32(REG_STATUS,           0x28)
+    FIELD(REG_STATUS, EVENT,       0, 1)
+    FIELD(REG_STATUS, SYNC,        1, 1)
+    FIELD(REG_STATUS, PAUSE,       2, 1)
+    FIELD(REG_STATUS, PULSE_OUT,   3, 1)
+    FIELD(REG_STATUS, SYNC_PERIOD, 4, 1)
+REG32(REG_SYNC_PERIOD,      0x2c) // 32-bit field of STATUS reg in spec
+REG32(REG_CONFIG_LO,        0x30)
+    FIELD(REG_CONFIG_LO, SYNC_SOURCE, 0,  3) // Sync Select in spec
+    FIELD(REG_CONFIG_LO, TICKDIV,     3, 16)
+REG32(REG_CONFIG_HI,        0x34)
+REG32(REG_PULSE_THRES,      0x38) // 32-bit filed of Pulse Config reg in spec
+REG32(REG_PULSE_CONFIG,     0x3c)
+    FIELD(REG_PULSE_CONFIG, PULSE_WIDTH, 0, 16)
 
-DEP_REG32(REG_CMD_ARM,          0x40)
-DEP_REG32(REG_CMD_FIRE,         0x44)
+REG32(REG_CMD_ARM,          0x40)
+REG32(REG_CMD_FIRE,         0x44)
 
 #define R_MAX (R_REG_CMD_FIRE + 1)
 
@@ -129,7 +129,7 @@ typedef struct HPSCElapsedTimer {
     qemu_irq irq;
 
     uint32_t regs[R_MAX];
-    DepRegisterInfo regs_info[R_MAX];
+    RegisterInfo regs_info[R_MAX];
 } HPSCElapsedTimer;
 
 
@@ -280,7 +280,7 @@ static void execute_cmd(HPSCElapsedTimer *s, cmd_t cmd)
     }
 }
 
-static void post_write_cmd_fire(DepRegisterInfo *reg, uint64_t val64)
+static void post_write_cmd_fire(RegisterInfo *reg, uint64_t val64)
 {
     HPSCElapsedTimer *s = HPSC_ELAPSED_TIMER(reg->opaque);
     cmd_t cmd = CMD_INVALID;
@@ -309,13 +309,13 @@ static void post_write_cmd_fire(DepRegisterInfo *reg, uint64_t val64)
     }
 }
 
-static void post_write_config_lo(DepRegisterInfo *reg, uint64_t val64)
+static void post_write_config_lo(RegisterInfo *reg, uint64_t val64)
 {
     HPSCElapsedTimer *s = HPSC_ELAPSED_TIMER(reg->opaque);
     update_freq(s); // TODO: is this update indeed a NOP if value unchanged?
 }
 
-static void post_write_status(DepRegisterInfo *reg, uint64_t val64)
+static void post_write_status(RegisterInfo *reg, uint64_t val64)
 {
     HPSCElapsedTimer *s = HPSC_ELAPSED_TIMER(reg->opaque);
     uint32_t status = s->regs[R_REG_STATUS];
@@ -342,52 +342,52 @@ static void post_write_status(DepRegisterInfo *reg, uint64_t val64)
     }
 }
 
-static DepRegisterAccessInfo hpsc_elapsed_regs_info[] = {
+static RegisterAccessInfo hpsc_elapsed_regs_info[] = {
     { .name = "REG_CAPTURED_LO",
-        .decode.addr = A_REG_CAPTURED_LO,
+        .addr = A_REG_CAPTURED_LO,
         .reset = 0x0,
         .ro = ~0,
     },{ .name = "REG_CAPTURED_HI",
-        .decode.addr = A_REG_CAPTURED_HI,
+        .addr = A_REG_CAPTURED_HI,
         .reset = 0x0,
         .ro = ~0,
     },{ .name = "REG_LOAD_LO",
-        .decode.addr = A_REG_LOAD_LO,
+        .addr = A_REG_LOAD_LO,
         .reset = 0x0,
     },{ .name = "REG_LOAD_HI",
-        .decode.addr = A_REG_LOAD_HI,
+        .addr = A_REG_LOAD_HI,
         .reset = 0x0,
     },{ .name = "REG_EVENT_LO",
-        .decode.addr = A_REG_EVENT_LO,
+        .addr = A_REG_EVENT_LO,
         .reset = 0x0,
     },{ .name = "REG_EVENT_HI",
-        .decode.addr = A_REG_EVENT_HI,
+        .addr = A_REG_EVENT_HI,
         .reset = 0x0,
     },{ .name = "REG_SYNC_LO",
-        .decode.addr = A_REG_SYNC_LO,
+        .addr = A_REG_SYNC_LO,
         .reset = 0x0,
         .ro = ~0,
     },{ .name = "REG_SYNC_HI",
-        .decode.addr = A_REG_SYNC_HI,
+        .addr = A_REG_SYNC_HI,
         .reset = 0x0,
         .ro = ~0,
     },{ .name = "REG_PAUSE",
-        .decode.addr = A_REG_PAUSE,
+        .addr = A_REG_PAUSE,
         .reset = 0x0,
         .ro = ~0,
     },{ .name = "REG_SYNC_INTERVAL",
-        .decode.addr = A_REG_SYNC_INTERVAL,
+        .addr = A_REG_SYNC_INTERVAL,
         .reset = 0x0,
     },{ .name = "REG_CONFIG_LO",
-        .decode.addr = A_REG_CONFIG_LO,
+        .addr = A_REG_CONFIG_LO,
         .reset = 0x0,
         .rsvd = ~(R_REG_CONFIG_LO_SYNC_SOURCE_MASK | R_REG_CONFIG_LO_TICKDIV_MASK),
         .post_write = post_write_config_lo,
     },{ .name = "REG_CONFIG_HI",
-        .decode.addr = A_REG_CONFIG_HI,
+        .addr = A_REG_CONFIG_HI,
         .rsvd = ~0,
     },{ .name = "REG_STATUS",
-        .decode.addr = A_REG_STATUS,
+        .addr = A_REG_STATUS,
         .reset = 0x0,
         .rsvd = ~(R_REG_STATUS_EVENT_MASK |
                   R_REG_STATUS_SYNC_MASK |
@@ -396,21 +396,21 @@ static DepRegisterAccessInfo hpsc_elapsed_regs_info[] = {
                   R_REG_STATUS_SYNC_PERIOD_MASK),
         .post_write = post_write_status,
     },{ .name = "REG_SYNC_PERIOD",
-        .decode.addr = A_REG_SYNC_PERIOD,
+        .addr = A_REG_SYNC_PERIOD,
         .reset = 0x0,
         .ro = ~0,
     },{ .name = "REG_PULSE_THRES",
-        .decode.addr = A_REG_PULSE_THRES,
+        .addr = A_REG_PULSE_THRES,
         .reset = 0x0,
     },{ .name = "REG_PULSE_CONFIG",
-        .decode.addr = A_REG_PULSE_CONFIG,
+        .addr = A_REG_PULSE_CONFIG,
         .reset = 0x0,
         .rsvd = ~(R_REG_PULSE_CONFIG_PULSE_WIDTH_MASK),
     },{ .name = "REG_CMD_ARM",
-        .decode.addr = A_REG_CMD_ARM,
+        .addr = A_REG_CMD_ARM,
         .reset = 0x0,
     },{ .name = "REG_CMD_FIRE",
-        .decode.addr = A_REG_CMD_FIRE,
+        .addr = A_REG_CMD_FIRE,
         .reset = 0x0,
         .post_write = post_write_cmd_fire,
    }
@@ -419,7 +419,7 @@ static DepRegisterAccessInfo hpsc_elapsed_regs_info[] = {
 static uint64_t hpsc_elapsed_read(void *opaque, hwaddr addr, unsigned size)
 {
     HPSCElapsedTimer *s = HPSC_ELAPSED_TIMER(opaque);
-    DepRegisterInfo *r = &s->regs_info[addr / 4];
+    RegisterInfo *r = &s->regs_info[addr / 4];
 
     if (!r->data) {
         qemu_log_mask(LOG_GUEST_ERROR,
@@ -427,14 +427,14 @@ static uint64_t hpsc_elapsed_read(void *opaque, hwaddr addr, unsigned size)
                 object_get_canonical_path(OBJECT(s)), addr);
         return 0;
     }
-    return dep_register_read(r);
+    return register_read(r, ~0, NULL, false);
 }
 
 static void hpsc_elapsed_write(void *opaque, hwaddr addr, uint64_t value,
                       unsigned size)
 {
     HPSCElapsedTimer *s = HPSC_ELAPSED_TIMER(opaque);
-    DepRegisterInfo *r = &s->regs_info[addr / 4];
+    RegisterInfo *r = &s->regs_info[addr / 4];
 
     if (!r->data) {
         qemu_log_mask(LOG_GUEST_ERROR,
@@ -442,28 +442,7 @@ static void hpsc_elapsed_write(void *opaque, hwaddr addr, uint64_t value,
                 object_get_canonical_path(OBJECT(s)), addr, value);
         return;
     }
-    dep_register_write(r, value, ~0);
-}
-
-static void hpsc_elapsed_access(MemoryTransaction *tr)
-{
-    MemTxAttrs attr = tr->attr;
-    void *opaque = tr->opaque;
-    hwaddr addr = tr->addr;
-    unsigned size = tr->size;
-    uint64_t value = tr->data.u64;;
-    bool is_write = tr->rw;
-
-    if (!attr.secure) {
-        qemu_log_mask(LOG_GUEST_ERROR, "unsecure access to timer denied\n");
-        return;
-    }
-
-    if (is_write) {
-        hpsc_elapsed_write(opaque, addr, value, size);
-    } else {
-        tr->data.u64 = hpsc_elapsed_read(opaque, addr, size);
-    }
+    register_write(r, value, ~0, NULL, false);
 }
 
 static void handle_event(void *opaque)
@@ -538,7 +517,7 @@ static void hpsc_elapsed_reset(DeviceState *dev)
     unsigned int i;
 
     for (i = 0; i < ARRAY_SIZE(s->regs_info); ++i)
-        dep_register_reset(&s->regs_info[i]);
+        register_reset(&s->regs_info[i]);
 
     s->offset = 0;
 
@@ -564,7 +543,6 @@ static void hpsc_elapsed_reset(DeviceState *dev)
 static void hpsc_elapsed_realize(DeviceState *dev, Error **errp)
 {
     HPSCElapsedTimer *s = HPSC_ELAPSED_TIMER(dev);
-    const char *prefix = object_get_canonical_path(OBJECT(dev));
     unsigned int i;
 
     // There range of the Qemu timer.h backend is a signed 64-bit integer.
@@ -582,25 +560,24 @@ static void hpsc_elapsed_realize(DeviceState *dev, Error **errp)
     QLIST_INIT(&s->slave_events);
 
     for (i = 0; i < ARRAY_SIZE(hpsc_elapsed_regs_info); ++i) {
-        DepRegisterInfo *r =
-                    &s->regs_info[hpsc_elapsed_regs_info[i].decode.addr / 4];
+        RegisterInfo *r =
+                    &s->regs_info[hpsc_elapsed_regs_info[i].addr / 4];
 
-        *r = (DepRegisterInfo) {
+        *r = (RegisterInfo) {
             .data = (uint8_t *)&s->regs[
-                    hpsc_elapsed_regs_info[i].decode.addr/4],
+                    hpsc_elapsed_regs_info[i].addr/4],
             .data_size = sizeof(uint32_t),
             .access = &hpsc_elapsed_regs_info[i],
-            .debug = HPSC_ELAPSED_TIMER_ERR_DEBUG,
-            .prefix = prefix,
             .opaque = s,
         };
-        dep_register_init(r);
+        register_init(r);
         qdev_pass_all_gpios(DEVICE(r), dev);
     }
 }
 
 static const MemoryRegionOps hpsc_elapsed_ops = {
-    .access = hpsc_elapsed_access,
+    .read = hpsc_elapsed_read,
+    .write = hpsc_elapsed_write,
     .endianness = DEVICE_LITTLE_ENDIAN,
     .valid = {
         .min_access_size = 4,
