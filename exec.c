@@ -3040,17 +3040,6 @@ static const MemoryRegionOps readonly_mem_ops = {
     },
 };
 
-MemoryRegionSection *iotlb_to_section(CPUState *cpu,
-                                      hwaddr index, MemTxAttrs attrs)
-{
-    int asidx = cpu_asidx_from_attrs(cpu, attrs);
-    CPUAddressSpace *cpuas = &cpu->cpu_ases[asidx];
-    AddressSpaceDispatch *d = atomic_rcu_read(&cpuas->memory_dispatch);
-    MemoryRegionSection *sections = d->map.sections;
-
-    return &sections[index & ~TARGET_PAGE_MASK];
-}
-
 static void io_mem_init(void)
 {
     memory_region_init_io(&io_mem_rom, NULL, &readonly_mem_ops,
