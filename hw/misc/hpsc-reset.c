@@ -36,6 +36,10 @@ REG32(INTC_RESET, 0x8)
 
 #define REG_MAX (R_INTC_RESET + 1)
 
+/* Align memory-mapped IO region to page size */
+#define IOMEM_PAGE_SIZE 0x400
+#define IOMEM_REGION_SIZE   (((REG_MAX * 4) / IOMEM_PAGE_SIZE + 1) * IOMEM_PAGE_SIZE)
+
 typedef struct HPSCResetCtrl {
     SysBusDevice parent_obj;
     MemoryRegion iomem;
@@ -166,7 +170,7 @@ static void hpsc_reset_ctrl_init(Object *obj)
     SysBusDevice *sbd = SYS_BUS_DEVICE(obj);
 
     memory_region_init_io(&s->iomem, obj, &hpsc_reset_ctrl_ops,
-                          s, TYPE_HPSC_RESET_CTRL, /*REG_MAX * 4*/ 0x400);
+                          s, TYPE_HPSC_RESET_CTRL, IOMEM_REGION_SIZE);
     sysbus_init_mmio(sbd, &s->iomem);
 
     /* wfi_in is the signal output by the CPU when it enters WFI state */
