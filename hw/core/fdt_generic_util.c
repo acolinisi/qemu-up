@@ -487,7 +487,7 @@ static qemu_irq fdt_get_gpio(FDTMachineInfo *fdti, char *node_path,
     }
 fail:
     if (reason) {
-        fprintf(stderr, "%s Failed: %s\n", node_path, reason);
+        DB_PRINT_NP(0, "ERROR: %s Failed: %s\n", node_path, reason);
     }
 
 fail_silent:
