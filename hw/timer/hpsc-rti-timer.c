@@ -1,6 +1,6 @@
 #include "qemu/osdep.h"
 #include "hw/sysbus.h"
-#include "hw/register-dep.h"
+#include "hw/register.h"
 #include "qemu/bitops.h"
 #include "qapi/error.h"
 #include "qemu/log.h"
@@ -28,13 +28,13 @@
 
 // TODO: is there support for 64-bit registers? to avoid HI,LO
 
-DEP_REG32(REG_INTERVAL_LO,      0x00)
-DEP_REG32(REG_INTERVAL_HI,      0x04)
-DEP_REG32(REG_COUNT_LO,         0x08)
-DEP_REG32(REG_COUNT_HI,         0x0c)
+REG32(REG_INTERVAL_LO,      0x00)
+REG32(REG_INTERVAL_HI,      0x04)
+REG32(REG_COUNT_LO,         0x08)
+REG32(REG_COUNT_HI,         0x0c)
 
-DEP_REG32(REG_CMD_ARM,          0x10)
-DEP_REG32(REG_CMD_FIRE,         0x14)
+REG32(REG_CMD_ARM,          0x10)
+REG32(REG_CMD_FIRE,         0x14)
 
 #define R_MAX (R_REG_CMD_FIRE + 1)
 
@@ -68,7 +68,7 @@ typedef struct HPSCRTITimer {
     qemu_irq irq;
 
     uint32_t regs[R_MAX];
-    DepRegisterInfo regs_info[R_MAX];
+    RegisterInfo regs_info[R_MAX];
 } HPSCRTITimer;
 
 
@@ -135,7 +135,7 @@ static void execute_cmd(HPSCRTITimer *s, cmd_t cmd)
     }
 }
 
-static void post_write_cmd_fire(DepRegisterInfo *reg, uint64_t val64)
+static void post_write_cmd_fire(RegisterInfo *reg, uint64_t val64)
 {
     HPSCRTITimer *s = HPSC_RTI_TIMER(reg->opaque);
     cmd_t cmd = CMD_INVALID;
@@ -162,40 +162,40 @@ static void post_write_cmd_fire(DepRegisterInfo *reg, uint64_t val64)
     }
 }
 
-static uint64_t pre_write_interval_lo(DepRegisterInfo *reg, uint64_t val)
+static uint64_t pre_write_interval_lo(RegisterInfo *reg, uint64_t val)
 {
     HPSCRTITimer *s = HPSC_RTI_TIMER(reg->opaque);
     return val & (s->max_count & 0xffffffff);
 }
 
-static uint64_t pre_write_interval_hi(DepRegisterInfo *reg, uint64_t val)
+static uint64_t pre_write_interval_hi(RegisterInfo *reg, uint64_t val)
 {
     HPSCRTITimer *s = HPSC_RTI_TIMER(reg->opaque);
     return val & (s->max_count >> 32);
 }
 
-static DepRegisterAccessInfo hpsc_rti_regs_info[] = {
+static RegisterAccessInfo hpsc_rti_regs_info[] = {
     { .name = "REG_COUNT_LO",
-        .decode.addr = A_REG_COUNT_LO,
+        .addr = A_REG_COUNT_LO,
         .reset = 0x0,
         .ro = ~0,
     },{ .name = "REG_COUNT_HI",
-        .decode.addr = A_REG_COUNT_HI,
+        .addr = A_REG_COUNT_HI,
         .reset = 0x0,
         .ro = ~0,
     },{ .name = "REG_INTERVAL_LO",
-        .decode.addr = A_REG_INTERVAL_LO,
+        .addr = A_REG_INTERVAL_LO,
          //.reset = ~0x0, // set to parent timer's max count on reset
         .pre_write = pre_write_interval_lo,
     },{ .name = "REG_INTERVAL_HI",
-        .decode.addr = A_REG_INTERVAL_HI,
+        .addr = A_REG_INTERVAL_HI,
          //.reset = ~0x0, // set to parent timer's max count on reset
         .pre_write = pre_write_interval_hi,
     },{ .name = "REG_CMD_ARM",
-        .decode.addr = A_REG_CMD_ARM,
+        .addr = A_REG_CMD_ARM,
         .reset = 0x0,
     },{ .name = "REG_CMD_FIRE",
-        .decode.addr = A_REG_CMD_FIRE,
+        .addr = A_REG_CMD_FIRE,
         .reset = 0x0,
         .post_write = post_write_cmd_fire,
    }
@@ -207,7 +207,7 @@ static void hpsc_rti_reset(DeviceState *dev)
     unsigned int i;
 
     for (i = 0; i < ARRAY_SIZE(s->regs_info); ++i)
-        dep_register_reset(&s->regs_info[i]);
+        register_reset(&s->regs_info[i]);
 
     qemu_set_irq(s->irq, 0);
 }
@@ -215,7 +215,7 @@ static void hpsc_rti_reset(DeviceState *dev)
 static uint64_t hpsc_rti_read(void *opaque, hwaddr addr, unsigned size)
 {
     HPSCRTITimer *s = HPSC_RTI_TIMER(opaque);
-    DepRegisterInfo *r = &s->regs_info[addr / 4];
+    RegisterInfo *r = &s->regs_info[addr / 4];
 
     if (!r->data) {
         qemu_log_mask(LOG_GUEST_ERROR,
@@ -223,14 +223,14 @@ static uint64_t hpsc_rti_read(void *opaque, hwaddr addr, unsigned size)
                 object_get_canonical_path(OBJECT(s)), addr);
         return 0;
     }
-    return dep_register_read(r);
+    return register_read(r, ~0, NULL, false);
 }
 
 static void hpsc_rti_write(void *opaque, hwaddr addr, uint64_t value,
                       unsigned size)
 {
     HPSCRTITimer *s = HPSC_RTI_TIMER(opaque);
-    DepRegisterInfo *r = &s->regs_info[addr / 4];
+    RegisterInfo *r = &s->regs_info[addr / 4];
 
     if (!r->data) {
         qemu_log_mask(LOG_GUEST_ERROR,
@@ -238,36 +238,12 @@ static void hpsc_rti_write(void *opaque, hwaddr addr, uint64_t value,
                 object_get_canonical_path(OBJECT(s)), addr, value);
         return;
     }
-    dep_register_write(r, value, ~0);
-}
-
-static void hpsc_rti_access(MemoryTransaction *tr)
-{
-#if 0
-    MemTxAttrs attr = tr->attr;
-#endif
-    void *opaque = tr->opaque;
-    hwaddr addr = tr->addr;
-    unsigned size = tr->size;
-    uint64_t value = tr->data.u64;;
-    bool is_write = tr->rw;
-
-#if 0 // TODO: spec: restricted to secure access?
-    if (!attr.secure) {
-        qemu_log_mask(LOG_GUEST_ERROR, "unsecure access to timer denied\n");
-        return;
-    }
-#endif
-
-    if (is_write) {
-        hpsc_rti_write(opaque, addr, value, size);
-    } else {
-        tr->data.u64 = hpsc_rti_read(opaque, addr, size);
-    }
+    register_write(r, value, ~0, NULL, false);
 }
 
 static const MemoryRegionOps hpsc_rti_ops = {
-    .access = hpsc_rti_access,
+    .read = hpsc_rti_read,
+    .write = hpsc_rti_write,
     .endianness = DEVICE_LITTLE_ENDIAN,
     .valid = {
         .min_access_size = 4,
@@ -278,9 +254,8 @@ static const MemoryRegionOps hpsc_rti_ops = {
 static void hpsc_rti_realize(DeviceState *dev, Error **errp)
 {
     HPSCRTITimer *s = HPSC_RTI_TIMER(dev);
-    const char *prefix = object_get_canonical_path(OBJECT(dev));
     unsigned int i;
-    DepRegisterAccessInfo *rai;
+    RegisterAccessInfo *rai;
     ARMSystemCounterClass *ascc = ARM_SYSTEM_COUNTER_GET_CLASS(s->sys_counter);
 
     // Ideally, max count would be constant ~0ULL, but due to limitations in
@@ -300,19 +275,17 @@ static void hpsc_rti_realize(DeviceState *dev, Error **errp)
                                         sys_counter_event_cb, s);
 
     for (i = 0; i < ARRAY_SIZE(hpsc_rti_regs_info); ++i) {
-        DepRegisterInfo *r =
-                    &s->regs_info[hpsc_rti_regs_info[i].decode.addr / 4];
+        RegisterInfo *r =
+                    &s->regs_info[hpsc_rti_regs_info[i].addr / 4];
 
-        *r = (DepRegisterInfo) {
+        *r = (RegisterInfo) {
             .data = (uint8_t *)&s->regs[
-                    hpsc_rti_regs_info[i].decode.addr/4],
+                    hpsc_rti_regs_info[i].addr/4],
             .data_size = sizeof(uint32_t),
             .access = &hpsc_rti_regs_info[i],
-            .debug = HPSC_RTI_TIMER_ERR_DEBUG,
-            .prefix = prefix,
             .opaque = s,
         };
-        dep_register_init(r);
+        register_init(r);
         qdev_pass_all_gpios(DEVICE(r), dev);
     }
 }
@@ -338,7 +311,7 @@ static void hpsc_rti_init(Object *obj)
     object_property_add_link(obj, "arm-system-counter", TYPE_ARM_SYSTEM_COUNTER,
                              (Object **)&s->sys_counter,
                              qdev_prop_allow_set_link_before_realize,
-                             OBJ_PROP_LINK_UNREF_ON_RELEASE,
+                             OBJ_PROP_LINK_STRONG,
                              &error_abort);
 }
 
