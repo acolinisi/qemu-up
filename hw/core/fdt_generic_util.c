@@ -396,7 +396,7 @@ static qemu_irq fdt_get_gpio(FDTMachineInfo *fdti, char *node_path,
         const FDTGenericGPIOConnection *fgg_con = NULL;
         uint16_t range, idx;
         const char *gpio_name = NULL;
-        qemu_irq ret;
+        qemu_irq ret = NULL;
 
         if (object_dynamic_cast(OBJECT(parent), TYPE_FDT_GENERIC_GPIO)) {
             const FDTGenericGPIOSet *set;
@@ -452,34 +452,40 @@ static qemu_irq fdt_get_gpio(FDTMachineInfo *fdti, char *node_path,
                 .next = fdti->irqs
             };
             fdti->irqs = irq;
-        }
+        } else { /* have to find the input on the parent */
+            if (!strcmp(propname, "interrupts-extended") &&
+                object_dynamic_cast(OBJECT(parent), TYPE_FDT_GENERIC_INTC) &&
+                parent_cells > 1) {
+                qemu_irq *irqs = g_new0(qemu_irq, fdt_generic_num_cpus);
+                int i;
 
-        if (!strcmp(propname, "interrupts-extended") &&
-            object_dynamic_cast(OBJECT(parent), TYPE_FDT_GENERIC_INTC) &&
-            parent_cells > 1) {
-            qemu_irq *irqs = g_new0(qemu_irq, fdt_generic_num_cpus);
-            int i;
+                fdt_get_irq_info_from_intc(fdti, irqs, parent_node_path, cells,
+                                        parent_cells, fdt_generic_num_cpus, &errp);
+                if (errp) {
+                    reason = "failed to create gpio connection";
+                    goto fail;
+                }
 
-            fdt_get_irq_info_from_intc(fdti, irqs, parent_node_path, cells,
-                                    parent_cells, fdt_generic_num_cpus, &errp);
-            if (errp) {
-                reason = "failed to create gpio connection";
+                ret = NULL;
+                for (i = 0; i < fdt_generic_num_cpus; i++) {
+                    if (irqs[i]) {
+                        ret = irqs[i];
+                        break;
+                    }
+                }
+                g_free(irqs);
+            } else {
+                ret = qdev_get_gpio_in_named(parent, gpio_name, idx);
+            }
+
+            if (!ret) {
+                reason =
+                    g_strdup_printf("cannot find input gpio %s[%d] in parent %s",
+                                    gpio_name ? gpio_name : "unnamed",
+                                    idx, parent_node_path);
+                free_reason = true;
                 goto fail;
             }
-
-            ret = NULL;
-            for (i = 0; i < fdt_generic_num_cpus; i++) {
-                if (irqs[i]) {
-                    ret = irqs[i];
-                    break;
-                }
-            }
-            g_free(irqs);
-        } else {
-            ret = qdev_get_gpio_in_named(parent, gpio_name, idx);
-        }
-
-        if (ret) {
             DB_PRINT_NP(1, "wiring GPIO input %s on %s ...\n",
                         fgg_con ? fgg_con->name : "unnamed", parent_node_path);
         }
