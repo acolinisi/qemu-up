@@ -43,12 +43,6 @@
 #include "qom/cpu.h"
 #include "block/block.h"
 
-#define HPSC
-#ifdef HPSC
-#include "qom/object.h"
-#include <string.h>
-#endif
-
 #ifndef FDT_GENERIC_UTIL_ERR_DEBUG
 #define FDT_GENERIC_UTIL_ERR_DEBUG 3
 #endif
