@@ -1,6 +1,6 @@
 #include "qemu/osdep.h"
 #include "hw/sysbus.h"
-#include "hw/register-dep.h"
+#include "hw/register.h"
 #include "qemu/bitops.h"
 #include "qapi/error.h"
 #include "qemu/log.h"
@@ -53,14 +53,14 @@
 
 // TODO: is there support for 64-bit registers? to avoid HI,LO
 
-#define DEP_ST_REG_(reg, addr) DEP_REG32(reg, addr)
-#define DEP_ST_REG(reg, stage, addr) DEP_ST_REG_(CONCAT4(REG_ST, stage, _, reg), addr)
+#define ST_REG_(reg, addr) REG32(reg, addr)
+#define ST_REG(reg, stage, addr) ST_REG_(CONCAT4(REG_ST, stage, _, reg), addr)
 
 #define REGS_STAGE(stage) \
-    DEP_ST_REG(TERMINAL_LO, stage, stage * STAGE_REGS_SIZE + 0x00) \
-    DEP_ST_REG(TERMINAL_HI, stage, stage * STAGE_REGS_SIZE + 0x04) \
-    DEP_ST_REG(COUNT_LO,    stage, stage * STAGE_REGS_SIZE + 0x08) \
-    DEP_ST_REG(COUNT_HI,    stage, stage * STAGE_REGS_SIZE + 0x0c) \
+    ST_REG(TERMINAL_LO, stage, stage * STAGE_REGS_SIZE + 0x00) \
+    ST_REG(TERMINAL_HI, stage, stage * STAGE_REGS_SIZE + 0x04) \
+    ST_REG(COUNT_LO,    stage, stage * STAGE_REGS_SIZE + 0x08) \
+    ST_REG(COUNT_HI,    stage, stage * STAGE_REGS_SIZE + 0x0c) \
 
 #define NUM_STAGE_REGS 4
 #define STAGE_REGS_SIZE (NUM_STAGE_REGS * 4) // register space size per stage
@@ -83,15 +83,15 @@ REGS_STAGE(3)
 
 #define GLOBAL_FRAME (NUM_STAGES * STAGE_REGS_SIZE)
 
-DEP_REG32(REG_CONFIG, GLOBAL_FRAME + 0x0)
-    DEP_FIELD(REG_CONFIG, EN, 1, 0)
-    DEP_FIELD(REG_CONFIG, TICKDIV, 8, 2) // 8-bits: max divider 1GHz/3,906,250Hz = 256
-DEP_REG32(REG_STATUS, GLOBAL_FRAME + 0x04)
-    DEP_FIELD(REG_STATUS, TIMEOUT, NUM_STAGES, 0)
-    DEP_FIELD(REG_STATUS, DBGDIS, 1, 31)
+REG32(REG_CONFIG, GLOBAL_FRAME + 0x0)
+    FIELD(REG_CONFIG, EN, 0, 1)
+    FIELD(REG_CONFIG, TICKDIV, 2, 8) // 8-bits: max divider 1GHz/3,906,250Hz = 256
+REG32(REG_STATUS, GLOBAL_FRAME + 0x04)
+    FIELD(REG_STATUS, TIMEOUT, 0, NUM_STAGES)
+    FIELD(REG_STATUS, DBGDIS, 31, 1)
 
-DEP_REG32(REG_CMD_ARM,  GLOBAL_FRAME + 0x08)
-DEP_REG32(REG_CMD_FIRE, GLOBAL_FRAME + 0x0c)
+REG32(REG_CMD_ARM,  GLOBAL_FRAME + 0x08)
+REG32(REG_CMD_FIRE, GLOBAL_FRAME + 0x0c)
 
 #define R_MAX (R_REG_CMD_FIRE + 1)
 
@@ -160,7 +160,7 @@ typedef struct HPSCWDTimer {
     bool enabled;
 
     uint32_t regs[R_MAX];
-    DepRegisterInfo regs_info[R_MAX];
+    RegisterInfo regs_info[R_MAX];
 } HPSCWDTimer;
 
 static void update_irq(HPSCWDTimer *s, unsigned stage, bool set)
@@ -316,7 +316,7 @@ static void execute_cmd(HPSCWDTimer *s, cmd_t cmd)
 }
 
 #if 0
-static void post_write_arm_code(DepRegisterInfo *reg, uint64_t val64)
+static void post_write_arm_code(RegisterInfo *reg, uint64_t val64)
 {
     HPSCWDTimer *s = HPSC_WDT_TIMER(reg->opaque);
     switch (val64) {
@@ -358,7 +358,7 @@ static void post_write_arm_code(DepRegisterInfo *reg, uint64_t val64)
 }
 #endif
 
-static void post_write_cmd_fire(DepRegisterInfo *reg, uint64_t val64)
+static void post_write_cmd_fire(RegisterInfo *reg, uint64_t val64)
 {
     HPSCWDTimer *s = HPSC_WDT_TIMER(reg->opaque);
     unsigned stage;
@@ -421,7 +421,7 @@ static void post_write_cmd_fire(DepRegisterInfo *reg, uint64_t val64)
     }
 }
 
-static uint64_t pre_write_config(DepRegisterInfo *reg, uint64_t val64)
+static uint64_t pre_write_config(RegisterInfo *reg, uint64_t val64)
 {
     HPSCWDTimer *s = HPSC_WDT_TIMER(reg->opaque);
     bool cur_en = extract32(s->regs[R_REG_CONFIG],
@@ -436,7 +436,7 @@ static uint64_t pre_write_config(DepRegisterInfo *reg, uint64_t val64)
     return val64;
 }
 
-static void post_write_config(DepRegisterInfo *reg, uint64_t val64)
+static void post_write_config(RegisterInfo *reg, uint64_t val64)
 {
     HPSCWDTimer *s = HPSC_WDT_TIMER(reg->opaque);
     bool enabled = extract32(s->regs[R_REG_CONFIG],
@@ -451,13 +451,13 @@ static void post_write_config(DepRegisterInfo *reg, uint64_t val64)
         wdt_enable(s);
 }
 
-static uint64_t pre_write_status(DepRegisterInfo *reg, uint64_t val64)
+static uint64_t pre_write_status(RegisterInfo *reg, uint64_t val64)
 {
     // ignore attempts to set the timeout status bit
     return val64 & ~R_REG_STATUS_TIMEOUT_MASK;
 }
 
-static void post_write_status(DepRegisterInfo *reg, uint64_t val64)
+static void post_write_status(RegisterInfo *reg, uint64_t val64)
 {
     HPSCWDTimer *s = HPSC_WDT_TIMER(reg->opaque);
     bool timeout = extract32(s->regs[R_REG_STATUS],
@@ -469,7 +469,7 @@ static void post_write_status(DepRegisterInfo *reg, uint64_t val64)
 }
 
 // Terminal values reset to max by spec
-static DepRegisterAccessInfo hpsc_wdt_regs_info[] = {
+static RegisterAccessInfo hpsc_wdt_regs_info[] = {
 
 // NOTE: hpsc_wdt_realize assumes that stage registers come first
 //       and that the terminal register is first among them
@@ -477,7 +477,7 @@ static DepRegisterAccessInfo hpsc_wdt_regs_info[] = {
 // Note: .reset and .rsvd are set at runtime depending on counter width
 #define REG_INFO_STAGE_INNER(reg, stage) \
     {   .name = "REG_ST" #stage "_" #reg, \
-        .decode.addr = CONCAT5(A_, REG_ST, stage, _, reg), \
+        .addr = CONCAT5(A_, REG_ST, stage, _, reg), \
     }
 #define REG_INFO_STAGE(reg, stage) REG_INFO_STAGE_INNER(reg, stage)
 
@@ -504,23 +504,23 @@ REGS_INFO_STAGE(3)
 #endif // NUM_STAGES
 
     { .name = "REG_CONFIG",
-        .decode.addr = A_REG_CONFIG,
+        .addr = A_REG_CONFIG,
         .reset = 0x0,
         .rsvd = ~(R_REG_CONFIG_EN_MASK | R_REG_CONFIG_TICKDIV_MASK),
         .pre_write = pre_write_config,
         .post_write = post_write_config,
     },{ .name = "REG_STATUS",
-        .decode.addr = A_REG_STATUS,
+        .addr = A_REG_STATUS,
         .reset = 0x0,
         .rsvd = ~(R_REG_STATUS_DBGDIS_MASK | R_REG_STATUS_TIMEOUT_MASK),
         .pre_write = pre_write_status,
         .post_write = post_write_status,
     },{ .name = "REG_CMD_ARM",
-        .decode.addr = A_REG_CMD_ARM,
+        .addr = A_REG_CMD_ARM,
         .reset = 0x0,
         //.post_write = post_write_arm_code,
     },{ .name = "REG_CMD_FIRE",
-        .decode.addr = A_REG_CMD_FIRE,
+        .addr = A_REG_CMD_FIRE,
         .reset = 0x0,
         .post_write = post_write_cmd_fire,
    }
@@ -533,7 +533,7 @@ static void hpsc_wdt_reset(DeviceState *dev)
     unsigned int stage;
 
     for (i = 0; i < ARRAY_SIZE(s->regs_info); ++i)
-        dep_register_reset(&s->regs_info[i]);
+        register_reset(&s->regs_info[i]);
 
     s->enabled = false;
     timer_update_freq(s);
@@ -551,7 +551,7 @@ static void hpsc_wdt_reset(DeviceState *dev)
 static uint64_t hpsc_wdt_read(void *opaque, hwaddr addr, unsigned size)
 {
     HPSCWDTimer *s = HPSC_WDT_TIMER(opaque);
-    DepRegisterInfo *r = &s->regs_info[addr / 4];
+    RegisterInfo *r = &s->regs_info[addr / 4];
 
     if (!r->data) {
         qemu_log_mask(LOG_GUEST_ERROR,
@@ -559,14 +559,14 @@ static uint64_t hpsc_wdt_read(void *opaque, hwaddr addr, unsigned size)
                 object_get_canonical_path(OBJECT(s)), addr);
         return 0;
     }
-    return dep_register_read(r);
+    return register_read(r, ~0, NULL, false);
 }
 
 static void hpsc_wdt_write(void *opaque, hwaddr addr, uint64_t value,
                       unsigned size)
 {
     HPSCWDTimer *s = HPSC_WDT_TIMER(opaque);
-    DepRegisterInfo *r = &s->regs_info[addr / 4];
+    RegisterInfo *r = &s->regs_info[addr / 4];
 
     if (!r->data) {
         qemu_log_mask(LOG_GUEST_ERROR,
@@ -574,32 +574,7 @@ static void hpsc_wdt_write(void *opaque, hwaddr addr, uint64_t value,
                 object_get_canonical_path(OBJECT(s)), addr, value);
         return;
     }
-    dep_register_write(r, value, ~0);
-}
-
-static void hpsc_wdt_access(MemoryTransaction *tr)
-{
-#if 0
-    MemTxAttrs attr = tr->attr;
-#endif
-    void *opaque = tr->opaque;
-    hwaddr addr = tr->addr;
-    unsigned size = tr->size;
-    uint64_t value = tr->data.u64;;
-    bool is_write = tr->rw;
-
-#if 0 // TODO
-    if (!attr.secure) {
-        qemu_log_mask(LOG_GUEST_ERROR, "unsecure access to timer denied\n");
-        return;
-    }
-#endif
-
-    if (is_write) {
-        hpsc_wdt_write(opaque, addr, value, size);
-    } else {
-        tr->data.u64 = hpsc_wdt_read(opaque, addr, size);
-    }
+    register_write(r, value, ~0, NULL, false);
 }
 
 static void timer_rollover(void *opaque)
@@ -631,7 +606,8 @@ static void timer_rollover(void *opaque)
 }
 
 static const MemoryRegionOps hpsc_wdt_ops = {
-    .access = hpsc_wdt_access,
+    .read = hpsc_wdt_read,
+    .write = hpsc_wdt_write,
     .endianness = DEVICE_LITTLE_ENDIAN,
     .valid = {
         .min_access_size = 4,
@@ -653,7 +629,6 @@ static const FDTGenericGPIOSet wdt_gpios[] = {
 static void hpsc_wdt_realize(DeviceState *dev, Error **errp)
 {
     HPSCWDTimer *s = HPSC_WDT_TIMER(dev);
-    const char *prefix = object_get_canonical_path(OBJECT(dev));
     unsigned int i;
 
     // With concept B, choose a width such that, SW can add counts from stages
@@ -671,8 +646,8 @@ static void hpsc_wdt_realize(DeviceState *dev, Error **errp)
 
     for (i = 0; i < NUM_STAGES; ++i) {
         // assumption: stage regs are first and term register is first stage reg
-        DepRegisterAccessInfo *term_lo = &hpsc_wdt_regs_info[i * NUM_STAGE_REGS];
-        DepRegisterAccessInfo *term_hi = &hpsc_wdt_regs_info[i * NUM_STAGE_REGS + 1];
+        RegisterAccessInfo *term_lo = &hpsc_wdt_regs_info[i * NUM_STAGE_REGS];
+        RegisterAccessInfo *term_hi = &hpsc_wdt_regs_info[i * NUM_STAGE_REGS + 1];
         term_lo->reset = (~0ULL >> (64 - counter_width)) & 0xffffffff;
         term_hi->reset = (~0ULL >> (64 - counter_width)) >> 32;
         term_lo->rsvd = ~term_lo->reset;
@@ -685,19 +660,17 @@ static void hpsc_wdt_realize(DeviceState *dev, Error **errp)
     }
 
     for (i = 0; i < ARRAY_SIZE(hpsc_wdt_regs_info); ++i) {
-        DepRegisterInfo *r =
-                    &s->regs_info[hpsc_wdt_regs_info[i].decode.addr / 4];
+        RegisterInfo *r =
+                    &s->regs_info[hpsc_wdt_regs_info[i].addr / 4];
 
-        *r = (DepRegisterInfo) {
+        *r = (RegisterInfo) {
             .data = (uint8_t *)&s->regs[
-                    hpsc_wdt_regs_info[i].decode.addr/4],
+                    hpsc_wdt_regs_info[i].addr/4],
             .data_size = sizeof(uint32_t),
             .access = &hpsc_wdt_regs_info[i],
-            .debug = HPSC_WDT_TIMER_ERR_DEBUG,
-            .prefix = prefix,
             .opaque = s,
         };
-        dep_register_init(r);
+        register_init(r);
         qdev_pass_all_gpios(DEVICE(r), dev);
     }
 
