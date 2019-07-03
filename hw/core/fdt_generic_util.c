@@ -448,7 +448,7 @@ static qemu_irq fdt_get_gpio(FDTMachineInfo *fdti, char *node_path,
                 .merge_fn = merge_fn,
                 .i = idx,
                 .irq = input,
-                .sink_info = NULL, /* FIMXE */
+                .sink_info = g_strdup("(path of output node not implemented)"), /* FIXME */
                 .next = fdti->irqs
             };
             fdti->irqs = irq;
@@ -1429,7 +1429,7 @@ exit_reg_parse:
                     .merge_fn = qemu_irq_shared_or_handler,
                     .i = named_idx,
                     .irq = output,
-                    .sink_info = NULL, /*FIXME */
+                    .sink_info = g_strdup("(path of input node not implemented)"), /*FIXME */
                     .next = fdti->irqs
                 };
                 fdti->irqs = irq;
