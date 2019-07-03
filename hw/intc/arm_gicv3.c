@@ -381,7 +381,6 @@ static FDTGenericGPIOConnection output_gpios[] = {
     { .name = "fiq",     .range = 0, .fdt_index = 0 },
     { .name = "virq",    .range = 0, .fdt_index = 0 },
     { .name = "vfiq",    .range = 0, .fdt_index = 0 },
-    { .name = "maint",   .range = 0, .fdt_index = 0 },
     { },
 };
 
