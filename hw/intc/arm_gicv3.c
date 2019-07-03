@@ -433,8 +433,10 @@ static void arm_gicv3_class_init(ObjectClass *klass, void *data)
     DeviceClass *dc = DEVICE_CLASS(klass);
     ARMGICv3CommonClass *agcc = ARM_GICV3_COMMON_CLASS(klass);
     ARMGICv3Class *agc = ARM_GICV3_CLASS(klass);
+    FDTGenericGPIOClass *fggc = FDT_GENERIC_GPIO_CLASS(klass);
 
     agcc->post_load = arm_gicv3_post_load;
+    fggc->client_gpios = arm_gicv3_client_gpios;
     device_class_set_parent_realize(dc, arm_gic_realize, &agc->parent_realize);
 }
 
