@@ -412,17 +412,20 @@ void qdev_init_gpio_out_named(DeviceState *dev, qemu_irq *pins,
         name = "unnamed-gpio-out";
     }
     memset(pins, 0, sizeof(*pins) * n);
-    for (i = 0; i < n; ++i) {
-        gchar *propname = g_strdup_printf("%s[%u]", name,
-                                          gpio_list->num_out + i);
 
+    /* Xilinx: For the FDT Generic GPIO magic we need this to be a wild card
+     * and not the usual numbered GPIOs.
+     */
+    gchar *propname = g_strdup_printf("%s[*]", name);
+
+    for (i = 0; i < n; ++i) {
         object_property_add_link(OBJECT(dev), propname, TYPE_IRQ,
                                  (Object **)&pins[i],
                                  object_property_allow_set_link,
                                  OBJ_PROP_LINK_STRONG,
                                  &error_abort);
-        g_free(propname);
     }
+    g_free(propname);
     gpio_list->num_out += n;
 }
 
