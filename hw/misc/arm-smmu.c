@@ -6064,6 +6064,11 @@ typedef struct SMMU {
     AddressSpace *as;
     MemoryRegion *mr;
 
+    struct {
+        qemu_irq global;
+        qemu_irq context[16];
+    } irq;
+
     uint32_t regs[R_MAX];
     RegisterInfo regs_info[R_MAX];
 } SMMU;
@@ -6092,9 +6097,31 @@ typedef struct TransReq {
     bool err;
 } TransReq;
 
+static void smmu_update_ctx_irq(SMMU *s, unsigned int cb)
+{
+    unsigned int cb_offset = (cb * PAGESIZE) / 4;
+    uint32_t sctlr;
+    uint32_t fsr;
+    bool ie, tf;
+    bool pending;
+
+    fsr = s->regs[R_SMMU_CB0_FSR + cb_offset];
+    sctlr = s->regs[R_SMMU_CB0_SCTLR + cb_offset];
+
+    tf = F_EX32(fsr, SMMU_CB0_FSR, TF);
+    ie = F_EX32(sctlr, SMMU_CB0_SCTLR, CFIE);
+    pending = tf && ie;
+    qemu_set_irq(s->irq.context[cb], pending);
+}
+
 static void smmu_fault(SMMU *s, unsigned int cb, TransReq *req, uint64_t syn)
 {
+    unsigned int cb_offset = (cb * PAGESIZE) / 4;
+
+    s->regs[R_SMMU_CB0_FSR + cb_offset] |= 1 << 1;
+
     req->err = true;
+    smmu_update_ctx_irq(s, cb);
 }
 
 static int smmu_stream_id_match(SMMU *s, uint32_t stream_id)
@@ -6114,7 +6141,6 @@ static int smmu_stream_id_match(SMMU *s, uint32_t stream_id)
 
 
         if (valid && (~mask & id) == (~mask & stream_id)) {
-//            printf("match! v=%x valid=%d mask=%x id=%x.%x\n", v, valid, mask, id, stream_id);
             s2cr = s->regs[R_SMMU_S2CR0 + i];
             cbndx = F_EX32(s2cr, SMMU_S2CR0, CBNDX_VMID);
 //            printf("cbndx=%d\n", cbndx);
@@ -6367,7 +6393,7 @@ static void smmu_ptw64(SMMU *s, unsigned int cb, TransReq *req)
 
 do_fault:
     qemu_log("smmu fault\n");
-    smmu_fault(s, cb, req, 0);
+    smmu_fault(s, cb, req, level);
 }
 
 static bool smmu500_at64(SMMU *s, unsigned int cb, hwaddr va,
@@ -6559,6 +6585,16 @@ static IOMMUTLBEntry smmu_translate(MemoryRegion *mr, hwaddr addr,
         }
     }
     return ret;
+}
+
+static void smmu_fsr_pw(RegisterInfo *reg, uint64_t val)
+{
+    SMMU *s = XILINX_SMMU500(reg->opaque);
+    unsigned int i;
+
+    for (i = 0; i < 16; i++) {
+        smmu_update_ctx_irq(s, i);
+    }
 }
 
 static RegisterAccessInfo smmu500_regs_info[] = {
@@ -7048,6 +7084,8 @@ static RegisterAccessInfo smmu500_regs_info[] = {
     },{ .name = "SMMU_CB0_PRRR_MAIR0",  .decode.addr = A_SMMU_CB0_PRRR_MAIR0,
     },{ .name = "SMMU_CB0_NMRR_MAIR1",  .decode.addr = A_SMMU_CB0_NMRR_MAIR1,
     },{ .name = "SMMU_CB0_FSR",  .decode.addr = A_SMMU_CB0_FSR,
+        .w1c = 0xffffffff,
+        .post_write = smmu_fsr_pw,
     },{ .name = "SMMU_CB0_FSRRESTORE",  .decode.addr = A_SMMU_CB0_FSRRESTORE,
     },{ .name = "SMMU_CB0_FAR_LOW",  .decode.addr = A_SMMU_CB0_FAR_LOW,
     },{ .name = "SMMU_CB0_FAR_HIGH",  .decode.addr = A_SMMU_CB0_FAR_HIGH,
@@ -7117,6 +7155,8 @@ static RegisterAccessInfo smmu500_regs_info[] = {
     },{ .name = "SMMU_CB1_PRRR_MAIR0",  .decode.addr = A_SMMU_CB1_PRRR_MAIR0,
     },{ .name = "SMMU_CB1_NMRR_MAIR1",  .decode.addr = A_SMMU_CB1_NMRR_MAIR1,
     },{ .name = "SMMU_CB1_FSR",  .decode.addr = A_SMMU_CB1_FSR,
+        .w1c = 0xffffffff,
+        .post_write = smmu_fsr_pw,
     },{ .name = "SMMU_CB1_FSRRESTORE",  .decode.addr = A_SMMU_CB1_FSRRESTORE,
     },{ .name = "SMMU_CB1_FAR_LOW",  .decode.addr = A_SMMU_CB1_FAR_LOW,
     },{ .name = "SMMU_CB1_FAR_HIGH",  .decode.addr = A_SMMU_CB1_FAR_HIGH,
@@ -7186,6 +7226,8 @@ static RegisterAccessInfo smmu500_regs_info[] = {
     },{ .name = "SMMU_CB2_PRRR_MAIR0",  .decode.addr = A_SMMU_CB2_PRRR_MAIR0,
     },{ .name = "SMMU_CB2_NMRR_MAIR1",  .decode.addr = A_SMMU_CB2_NMRR_MAIR1,
     },{ .name = "SMMU_CB2_FSR",  .decode.addr = A_SMMU_CB2_FSR,
+        .w1c = 0xffffffff,
+        .post_write = smmu_fsr_pw,
     },{ .name = "SMMU_CB2_FSRRESTORE",  .decode.addr = A_SMMU_CB2_FSRRESTORE,
     },{ .name = "SMMU_CB2_FAR_LOW",  .decode.addr = A_SMMU_CB2_FAR_LOW,
     },{ .name = "SMMU_CB2_FAR_HIGH",  .decode.addr = A_SMMU_CB2_FAR_HIGH,
@@ -7255,6 +7297,8 @@ static RegisterAccessInfo smmu500_regs_info[] = {
     },{ .name = "SMMU_CB3_PRRR_MAIR0",  .decode.addr = A_SMMU_CB3_PRRR_MAIR0,
     },{ .name = "SMMU_CB3_NMRR_MAIR1",  .decode.addr = A_SMMU_CB3_NMRR_MAIR1,
     },{ .name = "SMMU_CB3_FSR",  .decode.addr = A_SMMU_CB3_FSR,
+        .w1c = 0xffffffff,
+        .post_write = smmu_fsr_pw,
     },{ .name = "SMMU_CB3_FSRRESTORE",  .decode.addr = A_SMMU_CB3_FSRRESTORE,
     },{ .name = "SMMU_CB3_FAR_LOW",  .decode.addr = A_SMMU_CB3_FAR_LOW,
     },{ .name = "SMMU_CB3_FAR_HIGH",  .decode.addr = A_SMMU_CB3_FAR_HIGH,
@@ -7324,6 +7368,8 @@ static RegisterAccessInfo smmu500_regs_info[] = {
     },{ .name = "SMMU_CB4_PRRR_MAIR0",  .decode.addr = A_SMMU_CB4_PRRR_MAIR0,
     },{ .name = "SMMU_CB4_NMRR_MAIR1",  .decode.addr = A_SMMU_CB4_NMRR_MAIR1,
     },{ .name = "SMMU_CB4_FSR",  .decode.addr = A_SMMU_CB4_FSR,
+        .w1c = 0xffffffff,
+        .post_write = smmu_fsr_pw,
     },{ .name = "SMMU_CB4_FSRRESTORE",  .decode.addr = A_SMMU_CB4_FSRRESTORE,
     },{ .name = "SMMU_CB4_FAR_LOW",  .decode.addr = A_SMMU_CB4_FAR_LOW,
     },{ .name = "SMMU_CB4_FAR_HIGH",  .decode.addr = A_SMMU_CB4_FAR_HIGH,
@@ -7393,6 +7439,8 @@ static RegisterAccessInfo smmu500_regs_info[] = {
     },{ .name = "SMMU_CB5_PRRR_MAIR0",  .decode.addr = A_SMMU_CB5_PRRR_MAIR0,
     },{ .name = "SMMU_CB5_NMRR_MAIR1",  .decode.addr = A_SMMU_CB5_NMRR_MAIR1,
     },{ .name = "SMMU_CB5_FSR",  .decode.addr = A_SMMU_CB5_FSR,
+        .w1c = 0xffffffff,
+        .post_write = smmu_fsr_pw,
     },{ .name = "SMMU_CB5_FSRRESTORE",  .decode.addr = A_SMMU_CB5_FSRRESTORE,
     },{ .name = "SMMU_CB5_FAR_LOW",  .decode.addr = A_SMMU_CB5_FAR_LOW,
     },{ .name = "SMMU_CB5_FAR_HIGH",  .decode.addr = A_SMMU_CB5_FAR_HIGH,
@@ -7462,6 +7510,8 @@ static RegisterAccessInfo smmu500_regs_info[] = {
     },{ .name = "SMMU_CB6_PRRR_MAIR0",  .decode.addr = A_SMMU_CB6_PRRR_MAIR0,
     },{ .name = "SMMU_CB6_NMRR_MAIR1",  .decode.addr = A_SMMU_CB6_NMRR_MAIR1,
     },{ .name = "SMMU_CB6_FSR",  .decode.addr = A_SMMU_CB6_FSR,
+        .w1c = 0xffffffff,
+        .post_write = smmu_fsr_pw,
     },{ .name = "SMMU_CB6_FSRRESTORE",  .decode.addr = A_SMMU_CB6_FSRRESTORE,
     },{ .name = "SMMU_CB6_FAR_LOW",  .decode.addr = A_SMMU_CB6_FAR_LOW,
     },{ .name = "SMMU_CB6_FAR_HIGH",  .decode.addr = A_SMMU_CB6_FAR_HIGH,
@@ -7531,6 +7581,8 @@ static RegisterAccessInfo smmu500_regs_info[] = {
     },{ .name = "SMMU_CB7_PRRR_MAIR0",  .decode.addr = A_SMMU_CB7_PRRR_MAIR0,
     },{ .name = "SMMU_CB7_NMRR_MAIR1",  .decode.addr = A_SMMU_CB7_NMRR_MAIR1,
     },{ .name = "SMMU_CB7_FSR",  .decode.addr = A_SMMU_CB7_FSR,
+        .w1c = 0xffffffff,
+        .post_write = smmu_fsr_pw,
     },{ .name = "SMMU_CB7_FSRRESTORE",  .decode.addr = A_SMMU_CB7_FSRRESTORE,
     },{ .name = "SMMU_CB7_FAR_LOW",  .decode.addr = A_SMMU_CB7_FAR_LOW,
     },{ .name = "SMMU_CB7_FAR_HIGH",  .decode.addr = A_SMMU_CB7_FAR_HIGH,
@@ -7600,6 +7652,8 @@ static RegisterAccessInfo smmu500_regs_info[] = {
     },{ .name = "SMMU_CB8_PRRR_MAIR0",  .decode.addr = A_SMMU_CB8_PRRR_MAIR0,
     },{ .name = "SMMU_CB8_NMRR_MAIR1",  .decode.addr = A_SMMU_CB8_NMRR_MAIR1,
     },{ .name = "SMMU_CB8_FSR",  .decode.addr = A_SMMU_CB8_FSR,
+        .w1c = 0xffffffff,
+        .post_write = smmu_fsr_pw,
     },{ .name = "SMMU_CB8_FSRRESTORE",  .decode.addr = A_SMMU_CB8_FSRRESTORE,
     },{ .name = "SMMU_CB8_FAR_LOW",  .decode.addr = A_SMMU_CB8_FAR_LOW,
     },{ .name = "SMMU_CB8_FAR_HIGH",  .decode.addr = A_SMMU_CB8_FAR_HIGH,
@@ -7669,6 +7723,8 @@ static RegisterAccessInfo smmu500_regs_info[] = {
     },{ .name = "SMMU_CB9_PRRR_MAIR0",  .decode.addr = A_SMMU_CB9_PRRR_MAIR0,
     },{ .name = "SMMU_CB9_NMRR_MAIR1",  .decode.addr = A_SMMU_CB9_NMRR_MAIR1,
     },{ .name = "SMMU_CB9_FSR",  .decode.addr = A_SMMU_CB9_FSR,
+        .w1c = 0xffffffff,
+        .post_write = smmu_fsr_pw,
     },{ .name = "SMMU_CB9_FSRRESTORE",  .decode.addr = A_SMMU_CB9_FSRRESTORE,
     },{ .name = "SMMU_CB9_FAR_LOW",  .decode.addr = A_SMMU_CB9_FAR_LOW,
     },{ .name = "SMMU_CB9_FAR_HIGH",  .decode.addr = A_SMMU_CB9_FAR_HIGH,
@@ -7738,6 +7794,8 @@ static RegisterAccessInfo smmu500_regs_info[] = {
     },{ .name = "SMMU_CB10_PRRR_MAIR0",  .decode.addr = A_SMMU_CB10_PRRR_MAIR0,
     },{ .name = "SMMU_CB10_NMRR_MAIR1",  .decode.addr = A_SMMU_CB10_NMRR_MAIR1,
     },{ .name = "SMMU_CB10_FSR",  .decode.addr = A_SMMU_CB10_FSR,
+        .w1c = 0xffffffff,
+        .post_write = smmu_fsr_pw,
     },{ .name = "SMMU_CB10_FSRRESTORE",  .decode.addr = A_SMMU_CB10_FSRRESTORE,
     },{ .name = "SMMU_CB10_FAR_LOW",  .decode.addr = A_SMMU_CB10_FAR_LOW,
     },{ .name = "SMMU_CB10_FAR_HIGH",  .decode.addr = A_SMMU_CB10_FAR_HIGH,
@@ -7807,6 +7865,8 @@ static RegisterAccessInfo smmu500_regs_info[] = {
     },{ .name = "SMMU_CB11_PRRR_MAIR0",  .decode.addr = A_SMMU_CB11_PRRR_MAIR0,
     },{ .name = "SMMU_CB11_NMRR_MAIR1",  .decode.addr = A_SMMU_CB11_NMRR_MAIR1,
     },{ .name = "SMMU_CB11_FSR",  .decode.addr = A_SMMU_CB11_FSR,
+        .w1c = 0xffffffff,
+        .post_write = smmu_fsr_pw,
     },{ .name = "SMMU_CB11_FSRRESTORE",  .decode.addr = A_SMMU_CB11_FSRRESTORE,
     },{ .name = "SMMU_CB11_FAR_LOW",  .decode.addr = A_SMMU_CB11_FAR_LOW,
     },{ .name = "SMMU_CB11_FAR_HIGH",  .decode.addr = A_SMMU_CB11_FAR_HIGH,
@@ -7876,6 +7936,8 @@ static RegisterAccessInfo smmu500_regs_info[] = {
     },{ .name = "SMMU_CB12_PRRR_MAIR0",  .decode.addr = A_SMMU_CB12_PRRR_MAIR0,
     },{ .name = "SMMU_CB12_NMRR_MAIR1",  .decode.addr = A_SMMU_CB12_NMRR_MAIR1,
     },{ .name = "SMMU_CB12_FSR",  .decode.addr = A_SMMU_CB12_FSR,
+        .w1c = 0xffffffff,
+        .post_write = smmu_fsr_pw,
     },{ .name = "SMMU_CB12_FSRRESTORE",  .decode.addr = A_SMMU_CB12_FSRRESTORE,
     },{ .name = "SMMU_CB12_FAR_LOW",  .decode.addr = A_SMMU_CB12_FAR_LOW,
     },{ .name = "SMMU_CB12_FAR_HIGH",  .decode.addr = A_SMMU_CB12_FAR_HIGH,
@@ -7945,6 +8007,8 @@ static RegisterAccessInfo smmu500_regs_info[] = {
     },{ .name = "SMMU_CB13_PRRR_MAIR0",  .decode.addr = A_SMMU_CB13_PRRR_MAIR0,
     },{ .name = "SMMU_CB13_NMRR_MAIR1",  .decode.addr = A_SMMU_CB13_NMRR_MAIR1,
     },{ .name = "SMMU_CB13_FSR",  .decode.addr = A_SMMU_CB13_FSR,
+        .w1c = 0xffffffff,
+        .post_write = smmu_fsr_pw,
     },{ .name = "SMMU_CB13_FSRRESTORE",  .decode.addr = A_SMMU_CB13_FSRRESTORE,
     },{ .name = "SMMU_CB13_FAR_LOW",  .decode.addr = A_SMMU_CB13_FAR_LOW,
     },{ .name = "SMMU_CB13_FAR_HIGH",  .decode.addr = A_SMMU_CB13_FAR_HIGH,
@@ -8014,6 +8078,8 @@ static RegisterAccessInfo smmu500_regs_info[] = {
     },{ .name = "SMMU_CB14_PRRR_MAIR0",  .decode.addr = A_SMMU_CB14_PRRR_MAIR0,
     },{ .name = "SMMU_CB14_NMRR_MAIR1",  .decode.addr = A_SMMU_CB14_NMRR_MAIR1,
     },{ .name = "SMMU_CB14_FSR",  .decode.addr = A_SMMU_CB14_FSR,
+        .w1c = 0xffffffff,
+        .post_write = smmu_fsr_pw,
     },{ .name = "SMMU_CB14_FSRRESTORE",  .decode.addr = A_SMMU_CB14_FSRRESTORE,
     },{ .name = "SMMU_CB14_FAR_LOW",  .decode.addr = A_SMMU_CB14_FAR_LOW,
     },{ .name = "SMMU_CB14_FAR_HIGH",  .decode.addr = A_SMMU_CB14_FAR_HIGH,
@@ -8083,6 +8149,8 @@ static RegisterAccessInfo smmu500_regs_info[] = {
     },{ .name = "SMMU_CB15_PRRR_MAIR0",  .decode.addr = A_SMMU_CB15_PRRR_MAIR0,
     },{ .name = "SMMU_CB15_NMRR_MAIR1",  .decode.addr = A_SMMU_CB15_NMRR_MAIR1,
     },{ .name = "SMMU_CB15_FSR",  .decode.addr = A_SMMU_CB15_FSR,
+        .w1c = 0xffffffff,
+        .post_write = smmu_fsr_pw,
     },{ .name = "SMMU_CB15_FSRRESTORE",  .decode.addr = A_SMMU_CB15_FSRRESTORE,
     },{ .name = "SMMU_CB15_FAR_LOW",  .decode.addr = A_SMMU_CB15_FAR_LOW,
     },{ .name = "SMMU_CB15_FAR_HIGH",  .decode.addr = A_SMMU_CB15_FAR_HIGH,
@@ -8214,6 +8282,11 @@ static void smmu500_realize(DeviceState *dev, Error **errp)
     memory_region_init_iommu(&s->iommu, OBJECT(dev), &smmu_iommu_ops,
                              "iommu-smmu", INT64_MAX);
     sysbus_init_mmio(SYS_BUS_DEVICE(dev), &s->iommu);
+
+    sysbus_init_irq(SYS_BUS_DEVICE(dev), &s->irq.global);
+    for (i = 0; i < 16; i++) {
+        sysbus_init_irq(SYS_BUS_DEVICE(dev), &s->irq.context[i]);
+    }
 }
 
 static void smmu500_init(Object *obj)
