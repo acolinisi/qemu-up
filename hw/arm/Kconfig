@@ -86,6 +86,9 @@ config MPS2
 config FSL_IMX7
     bool
 
+config ARM_SMMUV2
+    bool
+
 config ARM_SMMUV3
     bool
 
