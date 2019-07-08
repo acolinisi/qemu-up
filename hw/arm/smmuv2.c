@@ -6082,6 +6082,7 @@ typedef struct TBU {
     IOMMUMemoryRegion iommu;
     AddressSpace *as;
     MemoryRegion *mr;
+    uint16_t stream_id;
 } TBU;
 
 struct SMMU {
@@ -6092,6 +6093,8 @@ struct SMMU {
     AddressSpace *dma_as;
 
     TBU tbu[MAX_TBU];
+    uint32_t nb_tbus;
+    uint16_t *stream_ids;
 
     struct {
         qemu_irq global;
@@ -6687,6 +6690,11 @@ static void smmu_nscr0_pw(RegisterInfo *reg, uint64_t val)
     s->regs[R_SMMU_NSCR0] = val;
 }
 
+static int smmu_attrs_to_index(IOMMUMemoryRegion *iommu, MemTxAttrs attrs)
+{
+    return 0;
+}
+
 static IOMMUTLBEntry smmu_translate_with_attrs(IOMMUMemoryRegion *mr, hwaddr addr,
                                     IOMMUAccessFlags flag, int iommu_idx,
                                     MemTxAttrs *attr)
@@ -6704,18 +6712,13 @@ static IOMMUTLBEntry smmu_translate_with_attrs(IOMMUMemoryRegion *mr, hwaddr add
     hwaddr pa = va;
     int prot;
     bool err = false;
-#if 0 // TODO
-    uint64_t master_id = attr->master_id;
-#else
-    uint64_t master_id = 0;
-#endif
     bool clientpd = ARRAY_FIELD_EX32(s->regs, SMMU_SCR0, CLIENTPD);
 
     if (clientpd) {
         return ret;
     }
 
-    cb = smmu_stream_id_match(s, master_id);
+    cb = smmu_stream_id_match(s, tbu->stream_id);
 
     if (cb >= 0) {
         err = smmu500_at(s, cb, va, false, true, &pa, &prot);
@@ -8401,6 +8404,11 @@ static void smmu500_realize(DeviceState *dev, Error **errp)
     SMMU *s = XILINX_SMMU500(dev);
     unsigned int i;
 
+    /* Transfer stream ID from prop to state because TBU is a nested object */
+    for (i = 0; i < s->nb_tbus; ++i) {
+        s->tbu[i].stream_id = s->stream_ids[i];
+    }
+
     for (i = 0; i < ARRAY_SIZE(smmu500_regs_info); ++i) {
         RegisterInfo *r = &s->regs_info[smmu500_regs_info[i].addr/4];
 
@@ -8429,6 +8437,7 @@ static void smmu500_init(Object *obj)
     SMMU *s = XILINX_SMMU500(obj);
     int i;
 
+    /* Could move this to realize() after we know TBU count, but ok as is. */
     for (i = 0; i < MAX_TBU; i++) {
         char *name = g_strdup_printf("mr-%d", i);
         object_property_add_link(obj, name, TYPE_MEMORY_REGION,
@@ -8455,6 +8464,8 @@ static bool smmu_parse_reg(FDTGenericMMap *obj, FDTGenericRegPropInfo reg,
                           TYPE_XILINX_SMMU500, R_MAX * 4);
     sysbus_init_mmio(sbd, &s->iomem);
 
+    s->nb_tbus = 0;
+
     for (i = 0; i < (reg.n - 1); i++) {
         char *name = g_strdup_printf("smmu-tbu%d", i);
 
@@ -8466,6 +8477,8 @@ static bool smmu_parse_reg(FDTGenericMMap *obj, FDTGenericRegPropInfo reg,
                                  name, UINT64_MAX);
         sysbus_init_mmio(sbd, MEMORY_REGION(&s->tbu[i].iommu));
         g_free(name);
+
+        s->nb_tbus++;
     }
 
     return parent_fmc ? parent_fmc->parse_reg(obj, reg, errp) : false;
@@ -8475,6 +8488,8 @@ static Property smmu_properties[] = {
     DEFINE_PROP_UINT32("pamax", SMMU, cfg.pamax, 48),
     DEFINE_PROP_LINK("dma", SMMU, dma_mr,
                      TYPE_MEMORY_REGION, MemoryRegion *),
+    DEFINE_PROP_ARRAY("stream-ids", SMMU, nb_tbus,
+                      stream_ids, qdev_prop_uint16, uint16_t),
     DEFINE_PROP_END_OF_LIST(),
 };
 
@@ -8506,6 +8521,7 @@ static void smmu500_iommu_memory_region_class_init(ObjectClass *klass,
 {
     IOMMUMemoryRegionClass *imrc = IOMMU_MEMORY_REGION_CLASS(klass);
 
+    imrc->attrs_to_index = smmu_attrs_to_index;
     imrc->translate_with_attrs = smmu_translate_with_attrs;
 }
 
