@@ -39,8 +39,8 @@
 #define XILINX_SMMU500_ERR_DEBUG 0
 #endif
 
-#define TYPE_XILINX_SMMU500 "arm.mmu-500"
-#define TYPE_XILINX_SMMU500_IOMMU_MEMORY_REGION "arm.mmu-500-iommu-memory-region"
+#define TYPE_XILINX_SMMU500 "arm,mmu-500"
+#define TYPE_XILINX_SMMU500_IOMMU_MEMORY_REGION "arm,mmu-500-iommu-memory-region"
 
 #define XILINX_SMMU500(obj) \
      OBJECT_CHECK(SMMU, (obj), TYPE_XILINX_SMMU500)
