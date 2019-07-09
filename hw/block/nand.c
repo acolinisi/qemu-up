@@ -875,6 +875,7 @@ uint32_t nand_getio(DeviceState *dev)
 
     if (s->cmd == NAND_CMD_READID) {
         return nand_readreg(s);
+    }
 
     /* Allow sequential reading */
     if (!s->iolen && s->cmd == NAND_CMD_READ0) {
