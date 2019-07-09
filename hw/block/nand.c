@@ -637,8 +637,9 @@ static void nand_realize(DeviceState *dev, Error **errp)
     s->ioaddr = s->io;
 }
 
-static int nand_initfn(SysBusDevice *sbd)
+static void nand_instance_init(Object *obj)
 {
+	SysBusDevice *sbd = SYS_BUS_DEVICE(obj);
     DeviceState *dev = DEVICE(sbd);
     NANDFlashState*s = NAND(dev);
     Error *local_err = NULL;
@@ -655,20 +656,17 @@ static int nand_initfn(SysBusDevice *sbd)
     if (s->blk) {
         if (blk_is_read_only(s->blk)) {
             error_report("Can't use a read-only drive");
-            return -1;
+            return;
         }
         qdev_prop_set_drive(dev, "drive", s->blk, &error_fatal);
         blk_set_perm(s->blk, BLK_PERM_CONSISTENT_READ | BLK_PERM_WRITE,
                            BLK_PERM_ALL, &local_err);
         if (local_err) {
             error_report_err(local_err);
-            return -1;
+            return;
         }
     }
     sysbus_init_mmio(sbd, &s->iomem);
-
-    nand_realize(dev, &local_err);
-    return 0;
 }
 
 static Property nand_properties[] = {
@@ -685,10 +683,8 @@ static Property nand_properties[] = {
 static void nand_class_init(ObjectClass *klass, void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
-    SysBusDeviceClass *k = SYS_BUS_DEVICE_CLASS(klass);
 
-    k->init = nand_initfn;
-
+    dc->realize = nand_realize;
     dc->reset = nand_reset;
     dc->vmsd = &vmstate_nand;
     dc->props = nand_properties;
@@ -699,6 +695,7 @@ static const TypeInfo nand_info = {
     .parent        = TYPE_SYS_BUS_DEVICE,
     .instance_size = sizeof(NANDFlashState),
     .class_init    = nand_class_init,
+    .instance_init = nand_instance_init,
 };
 
 static void nand_register_types(void)
