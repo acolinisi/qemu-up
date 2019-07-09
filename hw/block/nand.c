@@ -435,7 +435,7 @@ static void nand_command(NANDFlashState *s)
         s->iolen = 0;
         nand_pushio_byte(s, s->manf_id, true);
         nand_pushio_byte(s, s->chip_id, true);
-        nand_pushio_byte(s, 'Q'); /* Don't-care byte (often 0xa5) */
+        nand_pushio_byte(s, 'Q', true); /* Don't-care byte (often 0xa5) */
         if (nand_flash_ids[s->chip_id].options & NAND_SAMSUNG_LP) {
             /* Page Size, Block Size, Spare Size; bit 6 indicates
              * 8 vs 16 bit width NAND.
