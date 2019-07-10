@@ -580,8 +580,32 @@ static void nand_realize(DeviceState *dev, Error **errp)
 {
     int pagesize;
     NANDFlashState *s = NAND(dev);
+    DriveInfo *dinfo;
     int ret;
 
+    dinfo = drive_get_by_index(IF_PFLASH, s->pflash_index);
+    if (!dinfo) {
+        error_setg(errp, "Failed to find drive with index %u",
+                   s->pflash_index);
+        return;
+    }
+
+    s->blk = blk_by_legacy_dinfo(dinfo);
+
+    if (blk_is_read_only(s->blk)) {
+        error_setg(errp, "Can't use a read-only drive");
+        return;
+    }
+    ret = blk_set_perm(s->blk, BLK_PERM_CONSISTENT_READ | BLK_PERM_WRITE,
+                       BLK_PERM_ALL, errp);
+    if (ret < 0) {
+        return;
+    }
+
+    qdev_prop_set_drive(dev, "drive", s->blk, errp);
+    if (*errp) {
+        return;
+    }
 
     s->buswidth = nand_flash_ids[s->chip_id].width >> 3;
     s->size = nand_flash_ids[s->chip_id].size << 20;
@@ -641,31 +665,10 @@ static void nand_instance_init(Object *obj)
 {
 	SysBusDevice *sbd = SYS_BUS_DEVICE(obj);
     DeviceState *dev = DEVICE(sbd);
-    NANDFlashState*s = NAND(dev);
-    Error *local_err = NULL;
-    DriveInfo *dinfo = drive_get_by_index(IF_PFLASH, s->pflash_index);
+    NANDFlashState *s = NAND(dev);
 
     memory_region_init_io(&s->iomem, OBJECT(s), NULL, s, "nand",
                           s->region_size);
-    if (dinfo)
-        s->blk = blk_by_legacy_dinfo(dinfo);
-    else {
-        s->blk = NULL;
-        s->chip_id = 0;
-    }
-    if (s->blk) {
-        if (blk_is_read_only(s->blk)) {
-            error_report("Can't use a read-only drive");
-            return;
-        }
-        qdev_prop_set_drive(dev, "drive", s->blk, &error_fatal);
-        blk_set_perm(s->blk, BLK_PERM_CONSISTENT_READ | BLK_PERM_WRITE,
-                           BLK_PERM_ALL, &local_err);
-        if (local_err) {
-            error_report_err(local_err);
-            return;
-        }
-    }
     sysbus_init_mmio(sbd, &s->iomem);
 }
 
