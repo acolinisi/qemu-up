@@ -550,9 +550,10 @@ static void pl35x_init_nand(SysBusDevice *dev, PL35xItf *itf)
     return;
 }
 
-static int pl35x_init(SysBusDevice *dev)
+static void pl35x_init(Object *obj)
 {
-    PL35xState *s = PL35X(dev);
+    SysBusDevice *dev = SYS_BUS_DEVICE(obj);
+    PL35xState *s = PL35X(obj);
 
     memory_region_init_io(&s->mmio, OBJECT(dev), &pl35x_ops, s, "pl35x_io",
                           0x1000);
@@ -572,21 +573,16 @@ static int pl35x_init(SysBusDevice *dev)
     }
     s->itf[0].parent = s;
     s->itf[1].parent = s;
-    return 0;
-}
-static void pl35x_initfn(Object *obj)
-{
-    PL35xState *s = PL35X(obj);
 
     object_property_add_link(obj, "dev0", TYPE_DEVICE,
                              (Object **)&s->itf[0].dev,
                              object_property_allow_set_link,
-                             OBJ_PROP_LINK_UNREF_ON_RELEASE,
+                             OBJ_PROP_LINK_STRONG,
                              &error_abort);
     object_property_add_link(obj, "dev1", TYPE_DEVICE,
                              (Object **)&s->itf[1].dev,
                              object_property_allow_set_link,
-                             OBJ_PROP_LINK_UNREF_ON_RELEASE,
+                             OBJ_PROP_LINK_STRONG,
                              &error_abort);
 }
 
@@ -609,10 +605,8 @@ static const VMStateDescription vmstate_pl35x = {
 static void pl35x_class_init(ObjectClass *klass, void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
-    SysBusDeviceClass *k = SYS_BUS_DEVICE_CLASS(klass);
 
     dc->reset = pl35x_reset;
-    k->init = pl35x_init;
     dc->props = pl35x_properties;
     dc->vmsd = &vmstate_pl35x;
 }
@@ -622,7 +616,7 @@ static TypeInfo pl35x_info = {
     .parent         = TYPE_SYS_BUS_DEVICE,
     .instance_size  = sizeof(PL35xState),
     .class_init     = pl35x_class_init,
-    .instance_init  = pl35x_initfn,
+    .instance_init  = pl35x_init,
 };
 
 static void pl35x_register_types(void)
