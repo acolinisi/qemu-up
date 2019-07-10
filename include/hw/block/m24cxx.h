@@ -18,6 +18,8 @@ typedef struct {
     BlockBackend *blk;
     uint16_t size;
 
+    uint16_t device_index;
+
     uint8_t *storage;
 } M24CXXState;
 

@@ -75,7 +75,7 @@ static void m24cxx_sync(I2CSlave *i2c)
     /* the device is so small, just sync the whole thing */
     qemu_iovec_init(iov, 1);
     qemu_iovec_add(iov, s->storage, nb_sectors * BDRV_SECTOR_SIZE);
-    blk_aio_pwritev(s->blk, nb_sectors * BDRV_SECTOR_SIZE, iov, 0, m24cxx_sync_complete, iov);
+    blk_aio_pwritev(s->blk, 0, iov, 0, m24cxx_sync_complete, iov);
 }
 
 static void m24cxx_reset(DeviceState *dev)
@@ -174,7 +174,7 @@ static void m24cxx_realize(DeviceState *dev, Error **errp)
 {
     M24CXXState *s = M24CXX(dev);
     I2CSlave *i2c = I2C_SLAVE(dev);
-    DriveInfo *dinfo = drive_get_next(IF_MTD);
+    DriveInfo *dinfo = drive_get_by_index(IF_MTD, s->device_index);
 
     i2c->address_range = m24cxx_uses_i2c_addr(s) ? s->size >> 8 : 1;
     s->num_addr_bytes = s->size >> 11 ? 2 : 1;
@@ -183,9 +183,16 @@ static void m24cxx_realize(DeviceState *dev, Error **errp)
 
     if (dinfo) {
         s->blk = dinfo ? blk_by_legacy_dinfo(dinfo) : NULL;
-        /* FIXME: Move to late init */
+        Error *local_err = NULL;
+        blk_set_perm(s->blk, BLK_PERM_CONSISTENT_READ | BLK_PERM_WRITE,
+                        BLK_PERM_ALL, &local_err);
+        if (local_err) {
+            error_report_err(local_err);
+            return ;
+        }
+        /* initialization of s->storage from external device */
         if (blk_pread(s->blk, 0, s->storage,
-                      DIV_ROUND_UP(s->size, BDRV_SECTOR_SIZE)) < 0) {
+                      DIV_ROUND_UP(s->size, BDRV_SECTOR_SIZE) * BDRV_SECTOR_SIZE) < 0) {
             error_setg(errp, "Failed to initialize I2C EEPROM!\n");
             return;
         }
@@ -218,6 +225,7 @@ static const VMStateDescription vmstate_m24cxx = {
 static Property m24cxx_properties[] = {
     DEFINE_PROP_UINT16("size", M24CXXState, size, 1024),
     DEFINE_PROP_DRIVE("drive", M24CXXState, blk),
+    DEFINE_PROP_UINT16("device-index", M24CXXState, device_index, 0x10),
     DEFINE_PROP_END_OF_LIST(),
 };
 
