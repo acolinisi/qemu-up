@@ -100,37 +100,44 @@ const MemoryRegionOps offchip_sram_ops = {
     }
 };
 
-static int offchip_sram_initfn(SysBusDevice *sbd)
+static void offchip_sram_realize(DeviceState *dev, Error **errp)
 {
+    OFFCHIP_SRAMState *s = OFFCHIP_SRAM(dev);
+    DriveInfo *dinfo;
+
+    dinfo = drive_get_by_index(IF_PFLASH, s->pflash_index);
+    if (!dinfo) {
+        error_setg(errp, "Failed to find drive with index %u",
+                   s->pflash_index);
+        return;
+    }
+    s->blk = blk_by_legacy_dinfo(dinfo);
+    if (blk_is_read_only(s->blk)) {
+        error_setg(errp, "Can't use a read-only drive");
+        return;
+    }
+
+    qdev_prop_set_drive(dev, "drive", s->blk, &error_fatal);
+
+    blk_set_perm(s->blk, BLK_PERM_CONSISTENT_READ | BLK_PERM_WRITE,
+                       BLK_PERM_ALL, errp);
+    if (*errp) {
+        return;
+    }
+}
+
+
+static void offchip_sram_init(Object *obj)
+{
+    SysBusDevice *sbd = SYS_BUS_DEVICE(obj);
     DeviceState *dev = DEVICE(sbd);
     OFFCHIP_SRAMState*s = OFFCHIP_SRAM(dev);
-    Error *local_err = NULL;
-    DriveInfo *dinfo = drive_get_by_index(IF_PFLASH, s->pflash_index);
 
     memory_region_init_io(&s->iomem, OBJECT(s), NULL, s, "offchip-sram-mem",
                           s->region_size);
-
-    if (dinfo)
-        s->blk = blk_by_legacy_dinfo(dinfo);
-    else
-        s->blk = NULL;
-    if (s->blk) {
-        if (blk_is_read_only(s->blk)) {
-            error_report("Can't use a read-only drive");
-            return -1;
-        }
-        qdev_prop_set_drive(dev, "drive", s->blk, &error_fatal);
-        blk_set_perm(s->blk, BLK_PERM_CONSISTENT_READ | BLK_PERM_WRITE,
-                           BLK_PERM_ALL, &local_err);
-        if (local_err) {
-            error_report_err(local_err);
-            return -1;
-        }
-    }
     sysbus_init_mmio(sbd, &s->iomem);
-
-    return 0;
 }
+
 static Property offchip_sram_properties[] = {
     DEFINE_PROP_DRIVE("drive", OFFCHIP_SRAMState, blk),
     DEFINE_PROP_UINT32("pflash_index", OFFCHIP_SRAMState, pflash_index, 0),
@@ -143,9 +150,8 @@ static Property offchip_sram_properties[] = {
 static void offchip_sram_class_init(ObjectClass *klass, void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
-    SysBusDeviceClass *k = SYS_BUS_DEVICE_CLASS(klass);
 
-    k->init = offchip_sram_initfn;
+    dc->realize = offchip_sram_realize;
     dc->reset = offchip_sram_reset;
     dc->vmsd = &vmstate_offchip_sram;
     dc->props = offchip_sram_properties;
@@ -156,6 +162,7 @@ static const TypeInfo offchip_sram_info = {
     .parent        = TYPE_SYS_BUS_DEVICE,
     .instance_size = sizeof(OFFCHIP_SRAMState),
     .class_init    = offchip_sram_class_init,
+    .instance_init = offchip_sram_init,
 };
 
 static void offchip_sram_register_types(void)
