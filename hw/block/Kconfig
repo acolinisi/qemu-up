@@ -10,6 +10,9 @@ config SSI_M25P80
 config NAND
     bool
 
+config PL35X
+    bool
+
 config PFLASH_CFI01
     bool
 
