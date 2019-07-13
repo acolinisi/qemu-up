@@ -14,10 +14,6 @@
 
 #define TYPE_HPSC_RESET_CTRL "hpsc,reset-ctrl"
 
-#define HPSC_R52
-#ifdef HPSC_R52
-#include "hw/intc/arm_gicv3.h"
-#endif
 #define HPSC_RESET_CTRL(obj) \
      OBJECT_CHECK(HPSCResetCtrl, (obj), TYPE_HPSC_RESET_CTRL)
 
