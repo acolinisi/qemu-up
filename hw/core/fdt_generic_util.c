@@ -1230,6 +1230,16 @@ static int fdt_init_qdev(char *node_path, FDTMachineInfo *fdti, const char *comp
         /* Regular TYPE_DEVICE houskeeping */
         DB_PRINT_NP(0, "Short naming node: %s\n", short_name);
         (DEVICE(dev))->id = g_strdup(short_name);
+
+        /* Wait for the children to be added before realizing. */
+        int num_children = qemu_devtree_get_num_children(fdti->fdt, node_path, 1);
+        char **children = qemu_devtree_get_children(fdti->fdt, node_path, 1);
+        for (int child_idx = 0; child_idx < num_children; ++child_idx) {
+            while (!fdt_init_has_opaque(fdti, children[child_idx])) {
+                fdt_init_yield(fdti);
+            }
+        }
+
         qdev_init_nofail(DEVICE(dev));
         qemu_register_reset((void (*)(void *))dc->reset, dev);
     }
