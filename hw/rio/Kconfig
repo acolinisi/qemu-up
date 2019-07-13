@@ -1,0 +1,6 @@
+config RIO
+    bool
+
+config PRAESUM_RIO
+    bool
+    select RIO

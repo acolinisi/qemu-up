@@ -1,0 +1,1 @@
+obj-$(CONFIG_PRAESUM_RIO) += brc1-rio-endpt.o sm-rio-switch.o
